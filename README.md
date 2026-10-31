@@ -40,6 +40,7 @@ and Junie, and with anything else that speaks MCP. See
 
 ```sh
 brew tap sensahin/sheaf https://github.com/sensahin/sheaf
+brew trust sensahin/sheaf     # newer Homebrew asks before loading a third-party tap
 brew install sensahin/sheaf/sheaf
 brew services start sheaf     # runs `sheaf daemon` now and at login
 ```
