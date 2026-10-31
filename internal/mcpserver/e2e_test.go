@@ -340,3 +340,33 @@ func TestEveryAdapterAnswersInItsOwnFormat(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusHook(t *testing.T) {
+	ctx := context.Background()
+	client := daemon(t)
+	human := client("owner")
+	var a api.AddAgentResp
+	if err := human.Call(ctx, "agent.add", core.AgentSpec{Name: "a"}, &a); err != nil {
+		t.Fatal(err)
+	}
+	payload := `{"hook_event_name":"Notification","message":"Claude needs your permission to use Bash"}`
+	if err := hook.Status(ctx, client(a.Token), "blocked", strings.NewReader(payload)); err != nil {
+		t.Fatal(err)
+	}
+	var agents []core.Agent
+	human.Call(ctx, "agent.list", nil, &agents)
+	if len(agents) != 1 || agents[0].State != core.StateBlocked || agents[0].Note != "Claude needs your permission to use Bash" {
+		t.Fatalf("agent after status hook: %+v", agents)
+	}
+	// As the human (no agent token) it does nothing, and it never fails the
+	// agent's hook for an unreachable daemon.
+	if err := hook.Status(ctx, human, "working", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := hook.Status(ctx, api.NewClient("/nonexistent.sock", "x"), "working", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := hook.Status(ctx, human, "sleeping", nil); err == nil {
+		t.Fatal("unknown state accepted")
+	}
+}

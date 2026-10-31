@@ -92,6 +92,8 @@ For agents
                                    prints (OSC 7501)
   sheaf mcp                        MCP server on stdio (needs SHEAF_TOKEN)
   sheaf hook KIND [--wait SECONDS]
+  sheaf hook status working|blocked|idle|done|error
+                                   report status from an agent's own hooks
                                    pre-tool hook that routes to your queue
 
 State lives in $SHEAF_HOME (default ~/.sheaf).
@@ -351,6 +353,10 @@ func cmdRun(ctx context.Context, paths config.Paths, c *api.Client, args []strin
 		c.Token = tok
 		// The agent's own Sheaf tools (sheaf mcp, the hook) find it here.
 		os.Setenv("SHEAF_TOKEN", tok)
+	}
+	if *task != "" {
+		// Status hooks inside the agent report against the same task.
+		os.Setenv("SHEAF_TASK", *task)
 	}
 	var who core.Caller
 	if err := c.Call(ctx, "whoami", nil, &who); err != nil {
@@ -1091,6 +1097,19 @@ func cmdLog(ctx context.Context, c *api.Client, args []string) error {
 }
 
 func cmdHook(ctx context.Context, c *api.Client, args []string) error {
+	if len(args) >= 1 && args[0] == "status" {
+		if len(args) != 2 {
+			return fmt.Errorf("usage: sheaf hook status %s", strings.Join(hook.StatusStates, "|"))
+		}
+		// Read the agent's event payload only when one is piped in.
+		var in io.Reader
+		if st, err := os.Stdin.Stat(); err == nil && st.Mode()&os.ModeCharDevice == 0 {
+			in = os.Stdin
+		}
+		sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		return hook.Status(sctx, c, args[1], in)
+	}
 	hooks := hook.Adapters
 	if len(args) == 0 || hooks[args[0]] == nil {
 		return fmt.Errorf("usage: sheaf hook %s [--wait SECONDS]", strings.Join(setup.Kinds(), "|"))

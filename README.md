@@ -189,6 +189,23 @@ notification when the agent needs you. In a Rex pane, `sheaf start` also runs
 in place; Rex has no status API yet, so status lives in Sheaf
 (`sheaf status`, the web queue, `sheaf tmux-status`).
 
+## Status from agents' own hooks
+
+`sheaf setup` also wires each agent's lifecycle events to
+`sheaf hook status STATE`, so Sheaf knows what the agent is doing without
+the agent calling a tool:
+
+| Agent | working | blocked (needs you) | idle |
+|---|---|---|---|
+| Claude Code, Factory Droid | prompt submitted, tool finished | notification | turn ended |
+| Codex | prompt submitted | | turn ended |
+| Copilot CLI | prompt submitted | notification | agent stopped |
+| Gemini CLI | before agent | notification | after agent |
+| Cursor, goose | | | stop |
+
+The notification text ("Claude needs your permission to use Bash") becomes
+the status note. Run under `sheaf start`, the report also follows the task.
+
 ## Status without tool calls
 
 Claude Code, Codex, Amp, goose, opencode and others already print their

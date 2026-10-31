@@ -111,8 +111,7 @@ many tasks can be resumed when it starts.
 ## Next
 
 1. The remaining adapters, before the desktop app: Kiro hooks (format to
-   confirm on a real install). Agent hook events (stop, notification)
-   feed status, not just approvals. (Terminal adapters are done: tmux
+   confirm on a real install). (Terminal adapters are done: tmux
    windows, herdr and cmux status, Rex panes; so is the Homebrew formula.)
 2. Native desktop app for the queue and diffs; an optional end-to-end
    encrypted relay so the web queue works away from home without a VPN.
