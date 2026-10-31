@@ -165,6 +165,15 @@ resume command, wrapped in `sheaf run`, so when herdr brings the pane back
 after a restart, Sheaf keeps tracking the agent. Sheaf's queue, worktrees and
 messaging work the same as anywhere else.
 
+## cmux and Rex
+
+In a [cmux](https://cmux.com) workspace, `sheaf start AGENT` runs the agent in
+the current pane. Its status shows as an entry in the workspace's sidebar
+(`builder: blocked · needs permission: git push`), and cmux sends a
+notification when the agent needs you. In a Rex pane, `sheaf start` also runs
+in place; Rex has no status API yet, so status lives in Sheaf
+(`sheaf status`, the web queue, `sheaf tmux-status`).
+
 ## Status without tool calls
 
 Claude Code, Codex, Amp, goose, opencode and others already print their
