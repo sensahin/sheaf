@@ -226,6 +226,31 @@ The agent's output reaches your terminal unchanged, so `sheaf run` also works
 inside tmux, herdr or any other terminal. With `--task`, the task's status
 follows the agent's.
 
+## Desktop app
+
+The desktop app is a window for the same queue, built for a big screen:
+diffs file by file with line numbers, your agents, their tasks (mark them
+done, cancel or reopen), and messages, including new ones you start. It shows
+a desktop notification when an agent asks for approval or a review, asks a
+question, messages you or reports that it is blocked.
+
+Download it from [Releases](https://github.com/sensahin/sheaf/releases):
+`Sheaf_VERSION_macos_universal.zip` (Apple Silicon and Intel),
+`sheaf-desktop_VERSION_linux_ARCH.tar.gz` (needs WebKitGTK 4.1, as on Ubuntu
+22.04 or later) or `sheaf-desktop_VERSION_windows_amd64.zip` (needs the
+WebView2 runtime that Windows 10 and 11 ship). Each one includes the `sheaf`
+CLI.
+
+The app starts the daemon if it is not running and pairs itself as the device
+`desktop`, so there is nothing to set up. Closing the window leaves the daemon
+running for your agents. The page is served inside the app with no network
+port; it talks to the daemon over its socket with its own device token, which
+`sheaf device revoke` cuts off like any other.
+
+The macOS build is signed ad hoc, not yet with a Developer ID, so the first
+time, open it with right-click, Open, or run
+`xattr -d com.apple.quarantine /Applications/Sheaf.app`.
+
 ## Your queue on your phone
 
 The daemon also serves the queue as a small web page, on `127.0.0.1:7517` by
@@ -302,7 +327,18 @@ go test ./...
 scripts/build-release.sh v0.1.0   # all platforms, into dist/
 ```
 
-Pushing a `v*` tag builds every platform and publishes a GitHub release.
+The desktop app lives in its own module, `desktop/`, because it links the
+system webview with cgo ([Wails](https://wails.io)). On Linux, install
+`libgtk-3-dev` and `libwebkit2gtk-4.1-dev` first.
+
+```sh
+cd desktop && go build -tags desktop,production,webkit2_41 .   # Linux
+cd desktop && go build -tags desktop,production .              # macOS, Windows
+scripts/build-desktop.sh v0.1.0   # this platform's package, into dist/
+```
+
+Pushing a `v*` tag builds every platform and publishes a GitHub release, with
+the desktop app built on macOS, Linux (x86 and Arm) and Windows runners.
 
 ## Contributing
 

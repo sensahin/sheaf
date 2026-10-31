@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Sheaf
+Comment=Approvals, diffs and messages from your coding agents
+Exec=sheaf-desktop
+Icon=sheaf
+Terminal=false
+Categories=Development;
+StartupWMClass=sheaf-desktop
