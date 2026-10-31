@@ -26,7 +26,7 @@ func TestPlansAreValid(t *testing.T) {
 					t.Errorf("%s %s: invalid JSON: %v", kind, f.Path, err)
 				}
 			}
-			if !strings.Contains(f.Content, "/opt/bin/sheaf") {
+			if strings.Contains(f.Marker, "hook ") && !strings.Contains(f.Content, "/opt/bin/sheaf") {
 				t.Errorf("%s %s: does not use the sheaf path", kind, f.Path)
 			}
 		}

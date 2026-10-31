@@ -309,6 +309,8 @@ func TestEveryAdapterAnswersInItsOwnFormat(t *testing.T) {
 		"droid":       {`{"tool_name":"Execute","tool_input":{"command":"CMD"},"cwd":"/tmp"}`, `"permissionDecision":"deny"`, ""},
 		"antigravity": {`{"toolCall":{"name":"run_command","args":{"CommandLine":"CMD"}},"workspacePaths":["/tmp"]}`, `"decision":"deny"`, ""},
 		"cline":       {`{"clineVersion":"3.40","hookName":"PreToolUse","workspaceRoots":["/tmp"],"preToolUse":{"toolName":"execute_command","parameters":{"command":"CMD"}}}`, `"cancel":true`, `{"cancel":false}`},
+		"goose":       {`{"event":"PreToolUse","tool_name":"developer__shell","tool_input":{"command":"CMD"},"working_dir":"/tmp"}`, `"decision":"block"`, ""},
+		"amp":         {`{"tool":"Bash","input":{"cmd":"CMD"},"cwd":"/tmp"}`, `"decision":"deny"`, `{"decision":""}`},
 		"opencode":    {`{"tool":"bash","args":{"command":"CMD"},"cwd":"/tmp"}`, `"decision":"deny"`, `{"decision":""}`},
 	}
 	// Windsurf blocks by exit status, so its deny is an error.

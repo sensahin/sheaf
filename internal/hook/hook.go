@@ -110,6 +110,7 @@ type Adapter func(ctx context.Context, client *api.Client, r io.Reader, wait tim
 
 // Adapters are the agent programs `sheaf hook KIND` serves, by kind.
 var Adapters = map[string]Adapter{
+	"amp":         Amp,
 	"antigravity": Antigravity,
 	"claude-code": ClaudeCode,
 	"cline":       Cline,
@@ -118,6 +119,7 @@ var Adapters = map[string]Adapter{
 	"cursor":      Cursor,
 	"droid":       Droid,
 	"gemini":      Gemini,
+	"goose":       Goose,
 	"opencode":    OpenCode,
 	"windsurf":    Windsurf,
 }

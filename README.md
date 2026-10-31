@@ -81,6 +81,8 @@ sheaf setup droid          # .factory/hooks.json
 sheaf setup antigravity    # .agents/hooks.json + MCP entry to add
 sheaf setup cline          # .clinerules/hooks/PreToolUse + MCP entry to add
 sheaf setup windsurf       # .windsurf/hooks.json + .windsurf/mcp_config.json
+sheaf setup goose          # .agents/plugins/sheaf/ + extension entry to add
+sheaf setup amp            # .amp/plugins/sheaf.ts + MCP entry to add
 sheaf setup junie          # .junie/mcp/mcp.json (MCP only)
 ```
 
@@ -114,6 +116,8 @@ hooks stay out of the way.
 | Google Antigravity | deny, or force its own prompt | PreToolUse hook; some agy versions prompt even after an approval |
 | Cline | deny | `PreToolUse` hook script; unanswered falls back to Cline's approval |
 | Windsurf (Cascade) | deny | `pre_run_command`, `pre_write_code`, `pre_mcp_tool_use` hooks, which block by exit status |
+| goose | allow or deny | `PreToolUse` hook in a goose plugin; unanswered falls back to goose |
+| Amp | allow, deny, or ask in Amp | `tool.call` plugin; an unanswered call becomes an Amp confirm dialog |
 | JetBrains Junie | messaging and status only | MCP; Junie has no pre-tool hooks yet |
 | Aider, Kiro, anything else | status and worktrees | `sheaf start` / `sheaf run`; Aider has no hooks or MCP |
 | Anything with MCP | messaging and status only | run `sheaf mcp` on stdio |
