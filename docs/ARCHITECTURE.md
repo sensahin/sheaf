@@ -73,8 +73,12 @@ slow or stopped daemon never stalls the agent's terminal.
 | `approvals` | Agent, task, kind (action, diff, question), summary, detail, status, answer |
 | `devices` | Paired phones and browsers: name, token hash, last seen, revoked time |
 
-Tokens are shown once and stored only as hashes. The owner token lives in
-`$SHEAF_HOME/owner.token` (0600).
+The daemon stores tokens only as hashes. The CLI keeps the owner token in
+`$SHEAF_HOME/owner.token` and each agent's token in
+`$SHEAF_HOME/agents/NAME.token` (all 0600), so `sheaf start` and
+`sheaf resume` can launch agents without putting a token in tmux's arguments
+or the process list. Agents that run as your user can read these files; real
+separation between agents needs the container isolation on the roadmap.
 
 ## Rules the core enforces
 
@@ -101,7 +105,7 @@ many tasks can be resumed when it starts.
 
 1. Native desktop app for the queue and diffs; an optional end-to-end
    encrypted relay so the web queue works away from home without a VPN.
-2. Adapters: herdr, tmux, Rex and cmux panes; Codex and OpenCode hooks.
+2. Adapters: herdr, Rex and cmux panes; Codex and OpenCode hooks.
 3. Signed macOS app identity for the daemon, so TCC and Local Network
    consent stick.
 4. Optional container isolation per task; network and secret brokering.

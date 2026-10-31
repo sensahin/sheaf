@@ -81,8 +81,13 @@ func add[In any](s *mcp.Server, client *api.Client, name, desc, method string, b
 
 // Run serves the MCP server on stdio until the client disconnects.
 func Run(ctx context.Context, client *api.Client, version string) error {
-	if client.Token == "" {
-		return fmt.Errorf("SHEAF_TOKEN is not set; run `sheaf agent add <name>` to get one")
+	var who core.Caller
+	if err := client.Call(ctx, "whoami", nil, &who); err != nil {
+		return err
+	}
+	// An agent holding the owner's token could approve its own requests.
+	if who.IsHuman() {
+		return fmt.Errorf("sheaf mcp needs an agent's token in SHEAF_TOKEN, not yours; start the agent with `sheaf start`")
 	}
 	return New(client, version).Run(ctx, &mcp.StdioTransport{})
 }
