@@ -25,45 +25,52 @@ gives your agents what a terminal multiplexer can't:
 Sheaf is open source (Apache-2.0) and needs no account. Your agents and their
 messages never leave your machine.
 
-> Status: early. The core runtime and the web queue work and are tested;
-> the desktop app, a relay for reaching your queue from anywhere and adapters
-> for other terminals are next. See
-> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+<p align="center">
+  <img src="assets/desktop-queue.png" alt="The Sheaf desktop app: a diff waiting for review, shown file by file" width="820">
+</p>
+
+Sheaf works with Claude Code, Codex, OpenCode, Copilot CLI, Cursor, Gemini
+CLI, Qwen Code, Factory Droid, Antigravity, Cline, Windsurf, goose, Amp, Kiro
+and Junie, and with anything else that speaks MCP. See
+[docs/agents.md](docs/agents.md) for what each one gets.
 
 ## Install
 
-Download the archive for your system from
-[Releases](https://github.com/sensahin/sheaf/releases), check it against
-`checksums.txt`, and put `sheaf` on your PATH. It is a single binary with no
-dependencies. Or, with Go installed:
-
-With Homebrew (macOS and Linux):
+**Homebrew** (macOS and Linux):
 
 ```sh
 brew tap sensahin/sheaf https://github.com/sensahin/sheaf
-brew install sheaf
-brew services start sheaf     # runs `sheaf daemon` at login
+brew install sensahin/sheaf/sheaf
+brew services start sheaf     # runs `sheaf daemon` now and at login
 ```
 
-Until the first release is out, build the latest code with Homebrew instead
-(it installs Go for the build): `brew install --HEAD sensahin/sheaf/sheaf`.
+Before the first release is published, add `--HEAD` to build the latest code
+(Homebrew installs Go for the build): `brew install --HEAD sensahin/sheaf/sheaf`.
 
-Or download a binary from [Releases](https://github.com/sensahin/sheaf/releases),
-or build from source:
+**Desktop app.** Download it from
+[Releases](https://github.com/sensahin/sheaf/releases). It includes the CLI
+and starts the daemon for you; see [Desktop app](#desktop-app).
+
+**Binaries.** Each [release](https://github.com/sensahin/sheaf/releases) has
+`sheaf_VERSION_OS_ARCH.tar.gz` (or `.zip` for Windows) for macOS, Linux and
+Windows on x86 and Arm, with `checksums.txt`. It is one binary with no
+dependencies; put `sheaf` on your PATH.
+
+**From source**, with Go 1.26 or later:
 
 ```sh
 go install github.com/sensahin/sheaf/cmd/sheaf@latest
 ```
 
-macOS and Linux are fully supported. Windows builds are experimental:
-`sheaf run` is not available there yet.
+macOS and Linux are fully supported. Windows builds of the CLI, daemon and
+desktop app are less tested, and `sheaf run` (status from the agent's
+terminal) is not available there yet.
 
 ## Quick start
 
 ```sh
-
 sheaf init
-sheaf daemon &                      # or run it under launchd / systemd
+sheaf daemon &                      # or `brew services start sheaf`, or the desktop app
 
 sheaf agent add planner --kind claude-code --resume "claude --continue"
 sheaf agent add builder --kind codex --resume "codex resume --last"
@@ -108,28 +115,8 @@ its token from Sheaf, so its config holds no secret. Started outside Sheaf,
 an agent needs `SHEAF_TOKEN`, which `sheaf agent add` prints; without it the
 hooks stay out of the way.
 
-| Agent | Approvals | Notes |
-|---|---|---|
-| Claude Code | allow, deny, or hand back to its prompt | PreToolUse hook |
-| Codex CLI | allow or deny | PreToolUse hook; patches are checked file by file. Codex has no "ask" answer, so an unanswered call falls back to Codex's own approval policy. Trust the hook once with `/hooks`. |
-| OpenCode | deny | `tool.execute.before` plugin; an unanswered call falls back to OpenCode's own permissions |
-| GitHub Copilot CLI | allow, deny, or hand back to its prompt | camelCase `preToolUse` hook |
-| Cursor (cursor-agent, IDE) | allow or deny | `preToolUse` hook; unanswered falls back to Cursor. Editor-started agents have no `SHEAF_TOKEN`, so the hook ignores them. |
-| Gemini CLI, Qwen Code | allow or deny | `BeforeTool` hook; a deny reason reaches the model as the tool's error |
-| Factory Droid | allow, deny, or hand back to its prompt | PreToolUse hook (Claude Code format, Droid's tool names) |
-| Google Antigravity | deny, or force its own prompt | PreToolUse hook; some agy versions prompt even after an approval |
-| Cline | deny | `PreToolUse` hook script; unanswered falls back to Cline's approval |
-| Windsurf (Cascade) | deny | `pre_run_command`, `pre_write_code`, `pre_mcp_tool_use` hooks, which block by exit status |
-| goose | allow or deny | `PreToolUse` hook in a goose plugin; unanswered falls back to goose |
-| Amp | allow, deny, or ask in Amp | `tool.call` plugin; an unanswered call becomes an Amp confirm dialog |
-| JetBrains Junie | messaging and status only | MCP; Junie has no pre-tool hooks yet |
-| Kiro CLI | deny | `PreToolUse` hook in `.kiro/hooks/`, which blocks by exit status; Kiro's hook format is new, so this one is the least proven |
-| Aider, anything else | status and worktrees | `sheaf start` / `sheaf run`; Aider has no hooks or MCP |
-| Anything with MCP | messaging and status only | run `sheaf mcp` on stdio |
-
-The Claude Code and OpenCode adapters have been run against the real
-programs. The others follow each tool's published hook format and are covered
-by recorded-payload tests; report a mismatch if your version differs.
+Each agent's approvals, status events and limits are in
+[docs/agents.md](docs/agents.md).
 
 ## A session
 
@@ -193,23 +180,6 @@ the current pane. Its status shows as an entry in the workspace's sidebar
 notification when the agent needs you. In a Rex pane, `sheaf start` also runs
 in place; Rex has no status API yet, so status lives in Sheaf
 (`sheaf status`, the web queue, `sheaf tmux-status`).
-
-## Status from agents' own hooks
-
-`sheaf setup` also wires each agent's lifecycle events to
-`sheaf hook status STATE`, so Sheaf knows what the agent is doing without
-the agent calling a tool:
-
-| Agent | working | blocked (needs you) | idle |
-|---|---|---|---|
-| Claude Code, Factory Droid | prompt submitted, tool finished | notification | turn ended |
-| Codex | prompt submitted | | turn ended |
-| Copilot CLI | prompt submitted | notification | agent stopped |
-| Gemini CLI | before agent | notification | after agent |
-| Cursor, goose | | | stop |
-
-The notification text ("Claude needs your permission to use Bash") becomes
-the status note. Run under `sheaf start`, the report also follows the task.
 
 ## Status without tool calls
 
@@ -294,7 +264,7 @@ sheaf queue | show | approve | deny | answer
 sheaf pair | device ls|revoke
 sheaf log [--follow]
 sheaf setup KIND | start AGENT | resume [--tmux] | tmux-status
-sheaf run -- CMD | mcp | hook claude-code|codex|opencode
+sheaf run -- CMD | mcp | hook KIND | hook status STATE
 ```
 
 ## Policies
@@ -339,6 +309,9 @@ scripts/build-desktop.sh v0.1.0   # this platform's package, into dist/
 
 Pushing a `v*` tag builds every platform and publishes a GitHub release, with
 the desktop app built on macOS, Linux (x86 and Arm) and Windows runners.
+
+The landing page is `site/index.html`, a single static page with no build
+step; the `pages` workflow publishes it to GitHub Pages.
 
 ## Contributing
 
