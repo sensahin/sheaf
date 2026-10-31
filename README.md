@@ -67,59 +67,85 @@ macOS and Linux are fully supported. Windows builds of the CLI, daemon and
 desktop app are less tested, and `sheaf run` (status from the agent's
 terminal) is not available there yet.
 
-## Quick start
+## Quick start: Claude Code and Codex fixing bugs in one repo
+
+Say `~/myapp` has two bugs. Claude Code fixes one, Codex fixes the other,
+each on its own branch, and anything risky waits for you.
+
+**1. Start Sheaf** (once per machine):
 
 ```sh
 sheaf init
-sheaf daemon &                      # or `brew services start sheaf`, or the desktop app
-
-sheaf agent add planner --kind claude-code --resume "claude --continue"
-sheaf agent add builder --kind codex --resume "codex resume --last"
+brew services start sheaf        # or `sheaf daemon &`, or open the desktop app
 ```
 
-Connect each agent program once per project. This writes its pre-tool hook
-(so its permission prompts go to your Sheaf queue) and its MCP server entry
-(so it can message other agents):
+**2. Add the two agents** (once per machine):
 
 ```sh
-sheaf setup claude-code    # .claude/settings.json + `claude mcp add`
-sheaf setup codex          # .codex/hooks.json + ~/.codex/config.toml entry
-sheaf setup opencode       # .opencode/plugins/sheaf.js + opencode.json
-sheaf setup copilot        # .github/hooks/sheaf.json + MCP entry to add
-sheaf setup cursor         # .cursor/hooks.json + .cursor/mcp.json
-sheaf setup gemini         # .gemini/settings.json (hook + MCP)
-sheaf setup droid          # .factory/hooks.json
-sheaf setup antigravity    # .agents/hooks.json + MCP entry to add
-sheaf setup cline          # .clinerules/hooks/PreToolUse + MCP entry to add
-sheaf setup windsurf       # .windsurf/hooks.json + .windsurf/mcp_config.json
-sheaf setup goose          # .agents/plugins/sheaf/ + extension entry to add
-sheaf setup amp            # .amp/plugins/sheaf.ts + MCP entry to add
-sheaf setup kiro           # .kiro/hooks/sheaf.json + .kiro/settings/mcp.json
-sheaf setup junie          # .junie/mcp/mcp.json (MCP only)
+sheaf agent add claude --kind claude-code --resume "claude --continue"
+sheaf agent add codex  --kind codex       --resume "codex resume --last"
 ```
 
-`sheaf setup` creates missing files. When you already have a JSON config (say
-your own `.claude/settings.json`), it adds Sheaf's entries next to yours,
-keeps every setting you made, and saves the original as
-`settings.json.sheaf-backup`. For Claude Code it also runs `claude mcp add`
-for you. `--print` shows everything without writing.
-
-Then start agents through Sheaf:
+**3. Connect each program to Sheaf** (once per project, from the repo):
 
 ```sh
-sheaf start planner                   # a tmux window named "planner"
-sheaf start builder --task t-7xa6x441 # in that task's worktree
+cd ~/myapp
+sheaf setup claude-code   # hooks in .claude/settings.json, and runs `claude mcp add`
+sheaf setup codex         # hooks in .codex/hooks.json; prints a block for ~/.codex/config.toml
 ```
 
-`sheaf start` opens each agent in its own tmux window (or in the current
-terminal with `--here`, or when tmux isn't installed), already wrapped in
-`sheaf run`, so its status is tracked from the first second. The agent gets
-its token from Sheaf, so its config holds no secret. Started outside Sheaf,
-an agent needs `SHEAF_TOKEN`, which `sheaf agent add` prints; without it the
-hooks stay out of the way.
+Paste the `[mcp_servers.sheaf]` block that `sheaf setup codex` prints into
+`~/.codex/config.toml` (one time only).
 
-Each agent's approvals, status events and limits are in
-[docs/agents.md](docs/agents.md).
+**4. Create one task per bug.** Each gets its own git worktree and branch,
+so the two agents never edit the same checkout:
+
+```sh
+sheaf task new "Fix the login bug"    --owner claude --repo . --worktree
+sheaf task new "Fix the export crash" --owner codex  --repo . --worktree
+sheaf task ls
+```
+
+```
+TASK        STATUS  OWNER   TITLE                 WORKTREE
+t-shawp3f5  open    codex   Fix the export crash  ~/.sheaf/worktrees/t-shawp3f5
+t-m6277fzm  open    claude  Fix the login bug     ~/.sheaf/worktrees/t-m6277fzm
+```
+
+**5. Start each agent on its task**, using the IDs from `sheaf task ls`:
+
+```sh
+sheaf start claude --task t-m6277fzm
+sheaf start codex  --task t-shawp3f5
+```
+
+Each one opens in its own tmux window, in its task's worktree (add `--here`
+to run it in the current terminal instead). Sheaf copies the agent's hooks
+into the worktree and keeps them out of git. Then tell each agent what to fix,
+as you normally would. The first time, approve Sheaf's hook in Codex with
+`/hooks`.
+
+**6. Answer what needs you.** When an agent tries `git push` or `sudo`, or
+writes outside its worktree, the call waits in your queue. You'll see it in
+the desktop app (with a notification), on your paired phone, or in the
+terminal:
+
+```sh
+sheaf queue
+sheaf approve a-3pvj91nw "ok, feature branch only"
+```
+
+The agents can also message each other (`send`, `inbox`) and hand work over
+(`handoff`) through their Sheaf MCP tools. The Tasks view in the app shows
+both tasks, who owns each one and what state it's in. When a fix is done,
+merge its branch (`sheaf/t-…`) like any other.
+
+Other agents follow the same steps with their own `sheaf setup KIND`; see
+[docs/agents.md](docs/agents.md). `sheaf setup` creates missing files and
+merges into JSON configs you already have, keeping your settings and saving
+the original as `FILE.sheaf-backup`. `--print` shows everything without
+writing. Started outside Sheaf, an agent has no `SHEAF_TOKEN`, and the hooks
+stay out of its way.
 
 ## A session
 

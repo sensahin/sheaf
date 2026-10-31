@@ -25,6 +25,13 @@ changes nothing. A file it can't merge (TOML, YAML, JSON with comments) is
 left alone, and setup prints exactly what to add. `--print` shows everything
 without writing anything.
 
+A task worktree is a fresh checkout, so it doesn't have the config you set
+up in the main checkout. `sheaf start AGENT --task ID` writes the agent's
+project config into the worktree before it starts, unless the repository
+tracks those files, and lists them in the repository's `info/exclude` so they
+are never committed. For the full two-agent flow, see the
+[quick start](../README.md#quick-start-claude-code-and-codex-fixing-bugs-in-one-repo).
+
 Hooks find the agent by `SHEAF_TOKEN`. `sheaf start AGENT` sets it, so the
 config files hold no secret. An agent started without the token, such as one
 launched from an IDE, passes through the hooks untouched.
