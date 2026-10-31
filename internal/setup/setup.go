@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -663,4 +664,79 @@ func write(path, content string, mode os.FileMode) error {
 		return err
 	}
 	return os.Chmod(path, mode) // WriteFile keeps an existing file's mode
+}
+
+// PrepareWorktree writes an agent's project config into a task worktree, so
+// an agent started there finds its Sheaf hooks even though the worktree is a
+// fresh checkout without the main checkout's untracked config. Files the
+// repository tracks are left as they are. The files it writes are listed in
+// the repository's info/exclude, so the agent never commits them. Unknown
+// kinds are a no-op.
+func PrepareWorktree(dir, kind, sheaf string) ([]string, error) {
+	plan, err := For(kind, sheaf)
+	if err != nil {
+		return nil, nil
+	}
+	var files []File
+	for _, f := range plan.Files {
+		if exec.Command("git", "-C", dir, "ls-files", "--error-unmatch", "--", f.Path).Run() == nil {
+			continue // tracked: the repository decides
+		}
+		files = append(files, f)
+	}
+	plan.Files = files
+	res, err := Apply(dir, plan)
+	if err != nil {
+		return nil, err
+	}
+	var wrote []string
+	for _, r := range res {
+		if r.Status == "created" || r.Status == "updated" || r.Status == "merged" {
+			wrote = append(wrote, r.Path)
+		}
+	}
+	return wrote, exclude(dir, files)
+}
+
+// exclude lists paths in the repository's shared info/exclude file.
+func exclude(dir string, files []File) error {
+	if len(files) == 0 {
+		return nil
+	}
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
+	if err != nil {
+		return nil // not a git checkout
+	}
+	path := filepath.Join(strings.TrimSpace(string(out)), "info", "exclude")
+	old, _ := os.ReadFile(path)
+	have := map[string]bool{}
+	for _, l := range strings.Split(string(old), "\n") {
+		have[strings.TrimSpace(l)] = true
+	}
+	var add strings.Builder
+	for _, f := range files {
+		for _, p := range []string{"/" + filepath.ToSlash(f.Path), "/" + filepath.ToSlash(f.Path) + ".sheaf-backup"} {
+			if !have[p] {
+				add.WriteString(p + "\n")
+				have[p] = true
+			}
+		}
+	}
+	if add.Len() == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	fh, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer fh.Close()
+	prefix := ""
+	if len(old) > 0 && !strings.HasSuffix(string(old), "\n") {
+		prefix = "\n"
+	}
+	_, err = fh.WriteString(prefix + "# Sheaf: agent config written into task worktrees\n" + add.String())
+	return err
 }

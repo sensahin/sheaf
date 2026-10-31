@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -74,7 +75,7 @@ func Decide(ctx context.Context, client *api.Client, call Call, wait time.Durati
 	detail := strings.Join(targets, "\n")
 	summary := fmt.Sprintf("%s: %s", call.Tool, oneLine(detail, 120))
 	var a core.Approval
-	if err := client.Call(ctx, "approval.request", core.ApprovalRequest{Kind: core.ApprovalAction, Summary: summary, Detail: detail}, &a); err != nil {
+	if err := client.Call(ctx, "approval.request", core.ApprovalRequest{Kind: core.ApprovalAction, Summary: summary, Detail: detail, Task: os.Getenv("SHEAF_TASK")}, &a); err != nil {
 		return Verdict{Unresolved: true, Reason: "Sheaf could not queue this call: " + err.Error()}
 	}
 	if err := client.Call(ctx, "approval.wait", api.WaitReq{ID: a.ID, WaitSeconds: int(wait / time.Second)}, &a); err != nil {

@@ -1053,6 +1053,14 @@ func cmdStart(ctx context.Context, paths config.Paths, c *api.Client, args []str
 		switch {
 		case t.Worktree != "":
 			dir = t.Worktree
+			// The worktree is a fresh checkout: give it the agent's hooks.
+			wrote, err := setup.PrepareWorktree(dir, a.Kind, self())
+			if err != nil {
+				return fmt.Errorf("setting up %s in %s: %w", a.Kind, dir, err)
+			}
+			for _, p := range wrote {
+				fmt.Printf("wrote %s in the task's worktree\n", p)
+			}
 		case t.Repo != "":
 			dir = t.Repo
 		}

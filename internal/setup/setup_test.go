@@ -3,6 +3,7 @@ package setup
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -185,5 +186,44 @@ func TestStatusHooks(t *testing.T) {
 				t.Errorf("%s: config lacks %s", kind, w)
 			}
 		}
+	}
+}
+
+func TestPrepareWorktreeGivesTheAgentItsHooksWithoutCommittingThem(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	repo := t.TempDir()
+	git := func(dir string, args ...string) string {
+		cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.email=a@b", "-c", "user.name=a"}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return string(out)
+	}
+	git(repo, "init", "-q")
+	os.WriteFile(filepath.Join(repo, "a.txt"), []byte("a"), 0o644)
+	git(repo, "add", ".")
+	git(repo, "commit", "-qm", "init")
+	wt := filepath.Join(t.TempDir(), "wt")
+	git(repo, "worktree", "add", "-q", "-b", "task", wt)
+
+	wrote, err := PrepareWorktree(wt, "claude-code", "/bin/sheaf")
+	if err != nil || len(wrote) != 1 || wrote[0] != ".claude/settings.json" {
+		t.Fatalf("%v %v", wrote, err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(wt, ".claude/settings.json")); !strings.Contains(string(b), "/bin/sheaf hook claude-code") {
+		t.Fatalf("settings: %s", b)
+	}
+	if st := git(wt, "status", "--porcelain"); st != "" {
+		t.Fatalf("worktree not clean: %q", st)
+	}
+	again, err := PrepareWorktree(wt, "claude-code", "/bin/sheaf")
+	if err != nil || len(again) != 0 {
+		t.Fatalf("second run wrote %v %v", again, err)
+	}
+	if wrote, _ := PrepareWorktree(wt, "", "/bin/sheaf"); wrote != nil {
+		t.Fatal("unknown kind wrote files")
 	}
 }
