@@ -23,6 +23,8 @@ type File struct {
 	Content string
 	// Marker is text that shows the file is already set up for Sheaf.
 	Marker string
+	// Mode is the file's permission bits; 0 means 0644.
+	Mode os.FileMode
 	// Owned files are Sheaf's own and are rewritten freely. Others are the
 	// agent's config: Sheaf creates them but never rewrites them.
 	Owned bool
@@ -30,8 +32,11 @@ type File struct {
 
 // Plan is what connecting one agent program takes.
 type Plan struct {
-	Kind  string
-	Files []File
+	Kind string
+	// MCPOnly plans connect messaging and status but no hook: the agent
+	// has no pre-tool hook to enforce policy with.
+	MCPOnly bool
+	Files   []File
 	// Steps are commands or notes for what Sheaf does not write itself.
 	Steps []string
 }
@@ -55,6 +60,9 @@ var plans = map[string]func(sheaf string) Plan{
 	"gemini":      gemini,
 	"droid":       droid,
 	"antigravity": antigravity,
+	"cline":       cline,
+	"windsurf":    windsurf,
+	"junie":       junie,
 }
 
 // For returns the plan for kind, with sheaf as the path to the binary.
@@ -238,6 +246,71 @@ func antigravity(sheaf string) Plan {
 	}
 }
 
+func cline(sheaf string) Plan {
+	return Plan{
+		Kind: "cline",
+		Files: []File{{
+			// Cline runs an executable named after the hook.
+			Path:    ".clinerules/hooks/PreToolUse",
+			Content: "#!/bin/sh\n# Sheaf: check Cline's tool calls against your Sheaf policy and queue.\nexec " + shellQuote(sheaf) + " hook cline\n",
+			Marker:  "hook cline",
+			Mode:    0o755,
+			Owned:   true,
+		}},
+		Steps: []string{"Add Sheaf to Cline's MCP servers (MCP Servers > Configure):\n\n" +
+			jsonText(map[string]any{"mcpServers": map[string]any{"sheaf": map[string]any{
+				"command": sheaf, "args": []string{"mcp"},
+			}}})},
+	}
+}
+
+func windsurf(sheaf string) Plan {
+	entry := func() []any {
+		return []any{map[string]any{"command": sheaf + " hook windsurf", "show_output": false}}
+	}
+	return Plan{
+		Kind: "windsurf",
+		Files: []File{
+			{
+				Path: ".windsurf/hooks.json",
+				Content: jsonText(map[string]any{"hooks": map[string]any{
+					"pre_run_command":  entry(),
+					"pre_write_code":   entry(),
+					"pre_mcp_tool_use": entry(),
+				}}),
+				Marker: "hook windsurf",
+			},
+			{
+				Path: ".windsurf/mcp_config.json",
+				Content: jsonText(map[string]any{"mcpServers": map[string]any{"sheaf": map[string]any{
+					"command": sheaf, "args": []string{"mcp"},
+				}}}),
+				Marker: `"sheaf"`,
+			},
+		},
+		Steps: []string{"Windsurf hooks can only block: a call Sheaf denies is stopped, anything else goes to Windsurf's own approval."},
+	}
+}
+
+func junie(sheaf string) Plan {
+	return Plan{
+		Kind:    "junie",
+		MCPOnly: true,
+		Files: []File{{
+			Path: ".junie/mcp/mcp.json",
+			Content: jsonText(map[string]any{"mcpServers": map[string]any{"sheaf": map[string]any{
+				"command": sheaf, "args": []string{"mcp"},
+			}}}),
+			Marker: `"sheaf"`,
+		}},
+		Steps: []string{"Junie has no pre-tool hooks yet, so Sheaf gives it messaging, tasks and status, but cannot hold its tool calls for approval."},
+	}
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 func tomlString(s string) string {
 	b, _ := json.Marshal(s) // JSON string escapes are valid TOML basic strings
 	return string(b)
@@ -294,7 +367,7 @@ func Apply(dir string, plan Plan) ([]Result, error) {
 		old, err := os.ReadFile(p)
 		switch {
 		case errors.Is(err, os.ErrNotExist):
-			if err := write(p, f.Content); err != nil {
+			if err := write(p, f.Content, f.Mode); err != nil {
 				return out, err
 			}
 			out = append(out, Result{Path: f.Path, Status: "created"})
@@ -303,7 +376,7 @@ func Apply(dir string, plan Plan) ([]Result, error) {
 		case string(old) == f.Content:
 			out = append(out, Result{Path: f.Path, Status: "ok"})
 		case f.Owned:
-			if err := write(p, f.Content); err != nil {
+			if err := write(p, f.Content, f.Mode); err != nil {
 				return out, err
 			}
 			out = append(out, Result{Path: f.Path, Status: "updated"})
@@ -316,9 +389,15 @@ func Apply(dir string, plan Plan) ([]Result, error) {
 	return out, nil
 }
 
-func write(path, content string) error {
+func write(path, content string, mode os.FileMode) error {
+	if mode == 0 {
+		mode = 0o644
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(content), 0o644)
+	if err := os.WriteFile(path, []byte(content), mode); err != nil {
+		return err
+	}
+	return os.Chmod(path, mode) // WriteFile keeps an existing file's mode
 }

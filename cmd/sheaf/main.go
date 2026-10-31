@@ -76,8 +76,9 @@ Recovery and audit
 
 Launching agents
   sheaf setup KIND [--print]       connect an agent program in this project
-                                   (antigravity, claude-code, codex, copilot,
-                                   cursor, droid, gemini, opencode)
+                                   (antigravity, claude-code, cline, codex,
+                                   copilot, cursor, droid, gemini, junie,
+                                   opencode, windsurf)
   sheaf start AGENT [--task T] [--here] [-- CMD]
                                    open the agent in a tmux window (or here),
                                    with its status tracked
@@ -1028,6 +1029,12 @@ func cmdHook(ctx context.Context, c *api.Client, args []string) error {
 		return err
 	}
 	out, err := hooks[args[0]](ctx, c, os.Stdin, time.Duration(*wait)*time.Second)
+	var blocked *hook.Blocked
+	if errors.As(err, &blocked) {
+		// Agents that block by exit status read the reason from stderr.
+		fmt.Fprintln(os.Stderr, blocked.Reason)
+		os.Exit(2)
+	}
 	if err != nil {
 		return err
 	}

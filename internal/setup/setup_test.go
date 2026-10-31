@@ -65,6 +65,13 @@ func TestApplyNeverRewritesAgentConfig(t *testing.T) {
 
 func TestEveryKindHasAHook(t *testing.T) {
 	for _, kind := range Kinds() {
+		p0, _ := For(kind, "sheaf")
+		if p0.MCPOnly {
+			if hook.Adapters[kind] != nil {
+				t.Errorf("%s is MCP-only but has a hook adapter", kind)
+			}
+			continue
+		}
 		if hook.Adapters[kind] == nil {
 			t.Errorf("sheaf setup %s writes a hook that `sheaf hook %s` does not serve", kind, kind)
 		}
@@ -76,5 +83,21 @@ func TestEveryKindHasAHook(t *testing.T) {
 		if !found {
 			t.Errorf("%s: no file runs `sheaf hook %s`", kind, kind)
 		}
+	}
+}
+
+func TestClineHookIsExecutable(t *testing.T) {
+	dir := t.TempDir()
+	p, _ := For("cline", "/opt/my sheaf/sheaf")
+	if _, err := Apply(dir, p); err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(filepath.Join(dir, ".clinerules/hooks/PreToolUse"))
+	if err != nil || st.Mode().Perm() != 0o755 {
+		t.Fatalf("mode: %v %v", st, err)
+	}
+	b, _ := os.ReadFile(filepath.Join(dir, ".clinerules/hooks/PreToolUse"))
+	if !strings.Contains(string(b), "exec '/opt/my sheaf/sheaf' hook cline") {
+		t.Fatalf("script: %s", b)
 	}
 }

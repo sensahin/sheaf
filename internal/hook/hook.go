@@ -112,10 +112,12 @@ type Adapter func(ctx context.Context, client *api.Client, r io.Reader, wait tim
 var Adapters = map[string]Adapter{
 	"antigravity": Antigravity,
 	"claude-code": ClaudeCode,
+	"cline":       Cline,
 	"codex":       Codex,
 	"copilot":     Copilot,
 	"cursor":      Cursor,
 	"droid":       Droid,
 	"gemini":      Gemini,
 	"opencode":    OpenCode,
+	"windsurf":    Windsurf,
 }
