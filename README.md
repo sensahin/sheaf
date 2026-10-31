@@ -45,6 +45,9 @@ brew install sheaf
 brew services start sheaf     # runs `sheaf daemon` at login
 ```
 
+Until the first release is out, build the latest code with Homebrew instead
+(it installs Go for the build): `brew install --HEAD sensahin/sheaf/sheaf`.
+
 Or download a binary from [Releases](https://github.com/sensahin/sheaf/releases),
 or build from source:
 
