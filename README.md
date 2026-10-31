@@ -83,6 +83,7 @@ sheaf setup cline          # .clinerules/hooks/PreToolUse + MCP entry to add
 sheaf setup windsurf       # .windsurf/hooks.json + .windsurf/mcp_config.json
 sheaf setup goose          # .agents/plugins/sheaf/ + extension entry to add
 sheaf setup amp            # .amp/plugins/sheaf.ts + MCP entry to add
+sheaf setup kiro           # .kiro/hooks/sheaf.json + .kiro/settings/mcp.json
 sheaf setup junie          # .junie/mcp/mcp.json (MCP only)
 ```
 
@@ -119,7 +120,8 @@ hooks stay out of the way.
 | goose | allow or deny | `PreToolUse` hook in a goose plugin; unanswered falls back to goose |
 | Amp | allow, deny, or ask in Amp | `tool.call` plugin; an unanswered call becomes an Amp confirm dialog |
 | JetBrains Junie | messaging and status only | MCP; Junie has no pre-tool hooks yet |
-| Aider, Kiro, anything else | status and worktrees | `sheaf start` / `sheaf run`; Aider has no hooks or MCP |
+| Kiro CLI | deny | `PreToolUse` hook in `.kiro/hooks/`, which blocks by exit status; Kiro's hook format is new, so this one is the least proven |
+| Aider, anything else | status and worktrees | `sheaf start` / `sheaf run`; Aider has no hooks or MCP |
 | Anything with MCP | messaging and status only | run `sheaf mcp` on stdio |
 
 The Claude Code and OpenCode adapters have been run against the real

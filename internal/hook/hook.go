@@ -120,6 +120,7 @@ var Adapters = map[string]Adapter{
 	"droid":       Droid,
 	"gemini":      Gemini,
 	"goose":       Goose,
+	"kiro":        Kiro,
 	"opencode":    OpenCode,
 	"windsurf":    Windsurf,
 }

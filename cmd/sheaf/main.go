@@ -79,8 +79,8 @@ Recovery and audit
 Launching agents
   sheaf setup KIND [--print]       connect an agent program in this project
                                    (antigravity, claude-code, cline, codex,
-                                   copilot, cursor, droid, gemini, junie,
-                                   opencode, windsurf)
+                                   copilot, cursor, droid, gemini, goose,
+                                   junie, kiro, amp, opencode, windsurf)
   sheaf start AGENT [--task T] [--here] [-- CMD]
                                    open the agent in a tmux window (or here),
                                    with its status tracked
