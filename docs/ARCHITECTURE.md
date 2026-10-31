@@ -55,6 +55,13 @@ on the event log. Pairing puts the token in the URL fragment, which browsers
 never send to the server; the page moves it to local storage and clears the
 address bar. Bearer tokens rather than cookies mean no CSRF surface.
 
+**`sheaf run` for status.** OSC 7501 travels in the agent's own terminal
+output, so the only place to read it is the pty. `sheaf run` starts the agent
+in a pty, copies every byte through unchanged, and a streaming scanner picks
+out the status sequences (split reads, BEL or ST terminators, and a size cap
+on the body). Reports go to the daemon in the background, latest wins, so a
+slow or stopped daemon never stalls the agent's terminal.
+
 ## Data model
 
 | Table | Holds |
@@ -92,11 +99,10 @@ many tasks can be resumed when it starts.
 
 ## Next
 
-1. Status from OSC 7501, so agents that already emit it need no tool calls.
-2. Native desktop app for the queue and diffs; an optional end-to-end
+1. Native desktop app for the queue and diffs; an optional end-to-end
    encrypted relay so the web queue works away from home without a VPN.
-3. Adapters: herdr, tmux, Rex and cmux panes; Codex and OpenCode hooks.
-4. Signed macOS app identity for the daemon, so TCC and Local Network
+2. Adapters: herdr, tmux, Rex and cmux panes; Codex and OpenCode hooks.
+3. Signed macOS app identity for the daemon, so TCC and Local Network
    consent stick.
-5. Optional container isolation per task; network and secret brokering.
-6. An open spec for the message bus.
+4. Optional container isolation per task; network and secret brokering.
+5. An open spec for the message bus.

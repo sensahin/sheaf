@@ -43,7 +43,7 @@ func New(client *api.Client, version string) *mcp.Server {
 	add(s, client, "message_status", "Check whether a message you sent has been read.", "message.status",
 		func(r api.IDReq) any { return r })
 
-	add(s, client, "report_status", "Tell Sheaf what you are doing: state is working, blocked, idle or done. With task set, the task moves too.", "agent.report_status",
+	add(s, client, "report_status", "Tell Sheaf what you are doing: state is working, blocked, idle, done or error. With task set, the task moves too.", "agent.report_status",
 		func(r core.StatusReport) any { return r })
 
 	add(s, client, "create_task", "Create a task, owned by you unless you name another owner. Set repo and worktree=true to give it its own git worktree.", "task.create",

@@ -92,6 +92,21 @@ When the work is ready, the builder asks for review with
 `request_approval(kind="diff", task=...)`, and `sheaf show` prints the diff
 from the task's worktree.
 
+## Status without tool calls
+
+Claude Code, Codex, Amp, goose, opencode and others already print their
+status as OSC 7501 sequences. Start an agent through `sheaf run` and Sheaf
+reads them on the way to your terminal, so the queue shows it as working,
+blocked (and why) or done without the agent calling any Sheaf tool:
+
+```sh
+SHEAF_TOKEN=sha_... sheaf run --task t-7xa6x441 -- claude
+```
+
+The agent's output reaches your terminal unchanged, so `sheaf run` also works
+inside tmux, herdr or any other terminal. With `--task`, the task's status
+follows the agent's.
+
 ## Your queue on your phone
 
 The daemon also serves the queue as a small web page, on `127.0.0.1:7517` by
@@ -134,7 +149,7 @@ sheaf send | inbox
 sheaf queue | show | approve | deny | answer
 sheaf pair | device ls|revoke
 sheaf resume [--tmux] | log [--follow]
-sheaf mcp | hook claude-code
+sheaf run -- CMD | mcp | hook claude-code
 ```
 
 ## Policies

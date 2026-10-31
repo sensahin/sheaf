@@ -23,6 +23,7 @@ import (
 	"github.com/sensahin/sheaf/internal/core"
 	"github.com/sensahin/sheaf/internal/hook"
 	"github.com/sensahin/sheaf/internal/mcpserver"
+	agentrun "github.com/sensahin/sheaf/internal/run"
 	"github.com/sensahin/sheaf/internal/store"
 	"rsc.io/qr"
 )
@@ -59,6 +60,8 @@ Recovery and audit
   sheaf log [--follow] [--after N]
 
 For agents
+  sheaf run [--task T] -- CMD...   run an agent and report the status it
+                                   prints (OSC 7501); needs SHEAF_TOKEN
   sheaf mcp                        MCP server on stdio (needs SHEAF_TOKEN)
   sheaf hook claude-code [--wait SECONDS]
                                    PreToolUse hook that routes to your queue
@@ -128,6 +131,8 @@ func run(args []string) error {
 		return mcpserver.Run(ctx, c, version)
 	case "hook":
 		return cmdHook(ctx, c, rest)
+	case "run":
+		return cmdRun(ctx, c, rest)
 	case "pair":
 		return cmdPair(ctx, c, rest)
 	case "device":
@@ -292,6 +297,41 @@ func webURL(a *net.TCPAddr) string {
 		}
 	}
 	return "http://" + net.JoinHostPort(host, fmt.Sprint(a.Port))
+}
+
+func cmdRun(ctx context.Context, c *api.Client, args []string) error {
+	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	task := fs.String("task", "", "task whose status follows the agent's")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() == 0 {
+		return fmt.Errorf("usage: sheaf run [--task T] -- CMD [ARGS...]")
+	}
+	var who core.Caller
+	if err := c.Call(ctx, "whoami", nil, &who); err != nil {
+		return err
+	}
+	if who.IsHuman() {
+		return fmt.Errorf("sheaf run reports status for an agent: set SHEAF_TOKEN to the agent's token")
+	}
+	// Signals go to the agent through its terminal; Sheaf just outlives it.
+	signal.Ignore(os.Interrupt, syscall.SIGTERM)
+	code, err := agentrun.Run(context.Background(), agentrun.Options{
+		Command: fs.Args(),
+		Env:     os.Environ(),
+		Task:    *task,
+		Stdin:   os.Stdin,
+		Stdout:  os.Stdout,
+		Report: func(ctx context.Context, r core.StatusReport) error {
+			return c.Call(ctx, "agent.report_status", r, nil)
+		},
+	})
+	if err != nil {
+		return err
+	}
+	os.Exit(code)
+	return nil
 }
 
 func cmdPair(ctx context.Context, c *api.Client, args []string) error {
