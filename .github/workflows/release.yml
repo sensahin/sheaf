@@ -28,3 +28,18 @@ jobs:
               $(case "$GITHUB_REF_NAME" in *-*) echo --prerelease;; esac)
           fi
           gh release upload "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.zip dist/checksums.txt --clobber
+      - name: Update the Homebrew formula
+        # Stable releases only. The formula lives in this repository, so
+        # `brew tap sensahin/sheaf https://github.com/sensahin/sheaf` works
+        # without a separate tap repository.
+        if: ${{ !contains(github.ref_name, '-') }}
+        run: |
+          mkdir -p Formula
+          scripts/homebrew-formula.sh "$GITHUB_REF_NAME" dist/checksums.txt > Formula/sheaf.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout -B main origin/main
+          git add Formula/sheaf.rb
+          git diff --cached --quiet || git commit -m "Update the Homebrew formula to $GITHUB_REF_NAME"
+          git push origin main
