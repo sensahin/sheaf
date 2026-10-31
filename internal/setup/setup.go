@@ -50,6 +50,9 @@ var plans = map[string]func(sheaf string) Plan{
 	"claude-code": claudeCode,
 	"codex":       codex,
 	"opencode":    openCode,
+	"copilot":     copilot,
+	"cursor":      cursor,
+	"gemini":      gemini,
 }
 
 // For returns the plan for kind, with sheaf as the path to the binary.
@@ -125,6 +128,74 @@ func openCode(sheaf string) Plan {
 				Marker: `"sheaf"`,
 			},
 		},
+	}
+}
+
+func copilot(sheaf string) Plan {
+	cmd := sheaf + " hook copilot"
+	return Plan{
+		Kind: "copilot",
+		Files: []File{{
+			Path: ".github/hooks/sheaf.json",
+			Content: jsonText(map[string]any{"version": 1, "hooks": map[string]any{
+				"preToolUse": []any{map[string]any{"type": "command", "bash": cmd, "timeoutSec": HookTimeout}},
+			}}),
+			Marker: "hook copilot",
+			Owned:  true,
+		}},
+		Steps: []string{
+			"Add Sheaf's MCP server to ~/.copilot/mcp-config.json:\n\n" +
+				jsonText(map[string]any{"mcpServers": map[string]any{"sheaf": map[string]any{
+					"type": "local", "command": sheaf, "args": []string{"mcp"}, "tools": []string{"*"},
+				}}}),
+		},
+	}
+}
+
+func cursor(sheaf string) Plan {
+	return Plan{
+		Kind: "cursor",
+		Files: []File{
+			{
+				Path: ".cursor/hooks.json",
+				Content: jsonText(map[string]any{"version": 1, "hooks": map[string]any{
+					"preToolUse": []any{map[string]any{"command": sheaf + " hook cursor", "timeout": HookTimeout}},
+				}}),
+				Marker: "hook cursor",
+			},
+			{
+				Path: ".cursor/mcp.json",
+				Content: jsonText(map[string]any{"mcpServers": map[string]any{"sheaf": map[string]any{
+					"command": sheaf, "args": []string{"mcp"},
+				}}}),
+				Marker: `"sheaf"`,
+			},
+		},
+		Steps: []string{"In the Cursor IDE, agents started from the editor have no SHEAF_TOKEN, so the hook stays out of their way. Run agents through `sheaf start` (cursor-agent) to put them under Sheaf."},
+	}
+}
+
+func gemini(sheaf string) Plan {
+	return Plan{
+		Kind: "gemini",
+		Files: []File{{
+			Path: ".gemini/settings.json",
+			Content: jsonText(map[string]any{
+				"hooks": map[string]any{"BeforeTool": []any{map[string]any{
+					"matcher": ".*",
+					"hooks": []any{map[string]any{
+						"type": "command", "name": "sheaf", "command": sheaf + " hook gemini",
+						"timeout": HookTimeout * 1000, // milliseconds
+					}},
+				}}},
+				"mcpServers": map[string]any{"sheaf": map[string]any{
+					"command": sheaf, "args": []string{"mcp"},
+					"env": map[string]string{"SHEAF_TOKEN": "$SHEAF_TOKEN", "SHEAF_HOME": "$SHEAF_HOME"},
+				}},
+			}),
+			Marker: "hook gemini",
+		}},
+		Steps: []string{"Qwen Code reads the same format from .qwen/settings.json: copy the file there to use it."},
 	}
 }
 

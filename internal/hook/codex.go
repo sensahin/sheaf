@@ -36,7 +36,7 @@ func codexCall(in PreToolUseInput) (Call, bool) {
 	case "read_file", "list_dir", "grep_files", "view_image", "update_plan":
 		return Call{}, false
 	default:
-		if strings.HasPrefix(in.ToolName, "mcp__sheaf__") {
+		if isSheafTool(in.ToolName) {
 			return Call{}, false
 		}
 		c.Action, c.Targets = core.ActionTool, []string{in.ToolName}

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/sensahin/sheaf/internal/api"
@@ -48,7 +47,7 @@ func openCodeCall(in OpenCodeInput) (Call, bool) {
 		return Call{}, false
 	default:
 		// OpenCode names MCP tools server_tool.
-		if strings.HasPrefix(in.Tool, "sheaf_") {
+		if isSheafTool(in.Tool) {
 			return Call{}, false
 		}
 		c.Action, c.Targets = core.ActionTool, []string{in.Tool}

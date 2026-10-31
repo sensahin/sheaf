@@ -63,6 +63,9 @@ Connect each agent program once per project. This writes its pre-tool hook
 sheaf setup claude-code    # .claude/settings.json + `claude mcp add`
 sheaf setup codex          # .codex/hooks.json + ~/.codex/config.toml entry
 sheaf setup opencode       # .opencode/plugins/sheaf.js + opencode.json
+sheaf setup copilot        # .github/hooks/sheaf.json + MCP entry to add
+sheaf setup cursor         # .cursor/hooks.json + .cursor/mcp.json
+sheaf setup gemini         # .gemini/settings.json (hook + MCP)
 ```
 
 `sheaf setup` creates missing files and never rewrites a config you already
@@ -88,7 +91,14 @@ hooks stay out of the way.
 | Claude Code | allow, deny, or hand back to its prompt | PreToolUse hook |
 | Codex CLI | allow or deny | PreToolUse hook; patches are checked file by file. Codex has no "ask" answer, so an unanswered call falls back to Codex's own approval policy. Trust the hook once with `/hooks`. |
 | OpenCode | deny | `tool.execute.before` plugin; an unanswered call falls back to OpenCode's own permissions |
+| GitHub Copilot CLI | allow, deny, or hand back to its prompt | camelCase `preToolUse` hook |
+| Cursor (cursor-agent, IDE) | allow or deny | `preToolUse` hook; unanswered falls back to Cursor. Editor-started agents have no `SHEAF_TOKEN`, so the hook ignores them. |
+| Gemini CLI, Qwen Code | allow or deny | `BeforeTool` hook; a deny reason reaches the model as the tool's error |
 | Anything with MCP | messaging and status only | run `sheaf mcp` on stdio |
+
+The Claude Code and OpenCode adapters have been run against the real
+programs. The others follow each tool's published hook format and are covered
+by recorded-payload tests; report a mismatch if your version differs.
 
 ## A session
 

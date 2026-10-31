@@ -10,6 +10,7 @@ package hook
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -101,4 +102,18 @@ func oneLine(s string, n int) string {
 		s = s[:n-1] + "…"
 	}
 	return s
+}
+
+// Adapter answers one agent program's pre-tool hook: it reads the agent's
+// payload from r and returns what to print, empty for no opinion.
+type Adapter func(ctx context.Context, client *api.Client, r io.Reader, wait time.Duration) ([]byte, error)
+
+// Adapters are the agent programs `sheaf hook KIND` serves, by kind.
+var Adapters = map[string]Adapter{
+	"claude-code": ClaudeCode,
+	"codex":       Codex,
+	"copilot":     Copilot,
+	"cursor":      Cursor,
+	"gemini":      Gemini,
+	"opencode":    OpenCode,
 }
