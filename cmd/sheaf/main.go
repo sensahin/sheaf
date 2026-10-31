@@ -7,6 +7,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -22,6 +24,7 @@ import (
 	"github.com/sensahin/sheaf/internal/hook"
 	"github.com/sensahin/sheaf/internal/mcpserver"
 	"github.com/sensahin/sheaf/internal/store"
+	"rsc.io/qr"
 )
 
 var version = "0.1.0-dev"
@@ -30,7 +33,7 @@ const usage = `sheaf: many agents, one agreement.
 
 Setup
   sheaf init                       create ~/.sheaf and your owner token
-  sheaf daemon                     run the coordination daemon
+  sheaf daemon [--web ADDR|off]    run the coordination daemon and web queue
   sheaf agent add NAME [--kind K] [--resume CMD]
   sheaf agent ls | rm NAME | token NAME | policy NAME [--set FILE]
 
@@ -43,6 +46,8 @@ Work
   sheaf inbox [--all] [--wait SECONDS]
 
 Your queue
+  sheaf pair [--name phone]        open the queue on your phone (QR code)
+  sheaf device ls | revoke ID
   sheaf queue [--all]              what needs you
   sheaf show ID                    one item, with its diff or command
   sheaf approve ID [NOTE]
@@ -87,7 +92,7 @@ func run(args []string) error {
 	case "init":
 		return cmdInit(ctx, paths)
 	case "daemon":
-		return cmdDaemon(ctx, paths)
+		return cmdDaemon(ctx, paths, rest)
 	}
 
 	c, err := client(paths)
@@ -123,6 +128,10 @@ func run(args []string) error {
 		return mcpserver.Run(ctx, c, version)
 	case "hook":
 		return cmdHook(ctx, c, rest)
+	case "pair":
+		return cmdPair(ctx, c, rest)
+	case "device":
+		return cmdDevice(ctx, c, rest)
 	}
 	return fmt.Errorf("unknown command %q (see `sheaf help`)", cmd)
 }
@@ -205,7 +214,12 @@ func cmdInit(ctx context.Context, paths config.Paths) error {
 	return nil
 }
 
-func cmdDaemon(ctx context.Context, paths config.Paths) error {
+func cmdDaemon(ctx context.Context, paths config.Paths, args []string) error {
+	fs := flag.NewFlagSet("daemon", flag.ContinueOnError)
+	web := fs.String("web", defaultWeb, `address for the web queue, or "off"; use 0.0.0.0:7517 or a Tailscale address to reach it from your phone`)
+	if _, err := parse(fs, args); err != nil {
+		return err
+	}
 	if err := paths.Ensure(); err != nil {
 		return err
 	}
@@ -240,7 +254,131 @@ func cmdDaemon(ctx context.Context, paths config.Paths) error {
 	if len(pending) > 0 {
 		fmt.Fprintf(os.Stderr, "%d item(s) waiting in your queue: run `sheaf queue`\n", len(pending))
 	}
-	return api.NewServer(svc).ListenUnix(ctx, paths.Socket)
+	srv := api.NewServer(svc)
+	if *web == "off" {
+		return srv.ListenUnix(ctx, paths.Socket)
+	}
+	l, err := net.Listen("tcp", *web)
+	if err != nil {
+		return fmt.Errorf("web queue: %w (pass --web off to disable it)", err)
+	}
+	srv.WebURL = webURL(l.Addr().(*net.TCPAddr))
+	fmt.Fprintf(os.Stderr, "web queue at %s (pair a device with `sheaf pair`)\n", srv.WebURL)
+	if !l.Addr().(*net.TCPAddr).IP.IsLoopback() {
+		fmt.Fprintln(os.Stderr, "warning: the web queue is reachable from your network over plain HTTP; prefer a private network such as Tailscale")
+	}
+	errc := make(chan error, 2)
+	go func() { errc <- srv.ListenTCP(ctx, l) }()
+	go func() { errc <- srv.ListenUnix(ctx, paths.Socket) }()
+	// Either listener failing takes the daemon down; ctx stops the other.
+	return <-errc
+}
+
+const defaultWeb = "127.0.0.1:7517"
+
+// webURL is the address a phone should open: a wildcard listen address is
+// replaced by this machine's first private IPv4 address.
+func webURL(a *net.TCPAddr) string {
+	host := a.IP.String()
+	if a.IP.IsUnspecified() {
+		host = "localhost"
+		if addrs, err := net.InterfaceAddrs(); err == nil {
+			for _, ad := range addrs {
+				if ipn, ok := ad.(*net.IPNet); ok && ipn.IP.To4() != nil && !ipn.IP.IsLoopback() {
+					host = ipn.IP.String()
+					break
+				}
+			}
+		}
+	}
+	return "http://" + net.JoinHostPort(host, fmt.Sprint(a.Port))
+}
+
+func cmdPair(ctx context.Context, c *api.Client, args []string) error {
+	fs := flag.NewFlagSet("pair", flag.ContinueOnError)
+	name := fs.String("name", "phone", "a name for the device")
+	if _, err := parse(fs, args); err != nil {
+		return err
+	}
+	var r api.PairResp
+	if err := c.Call(ctx, "device.pair", api.PairReq{Name: *name}, &r); err != nil {
+		return err
+	}
+	if r.URL == "" {
+		return fmt.Errorf("paired %s, but the daemon is not serving the web queue; restart it without --web off", r.Device.ID)
+	}
+	fmt.Printf("Scan this on %s, or open the link. It works only for this device.\n\n", *name)
+	if err := printQR(os.Stdout, r.URL); err != nil {
+		return err
+	}
+	fmt.Printf("\n%s\n\nRevoke it any time with: sheaf device revoke %s\n", r.URL, r.Device.ID)
+	return nil
+}
+
+// printQR draws a QR code with half-block characters, two rows per line.
+func printQR(w io.Writer, text string) error {
+	code, err := qr.Encode(text, qr.M)
+	if err != nil {
+		return err
+	}
+	const quiet = 2
+	black := func(x, y int) bool {
+		x, y = x-quiet, y-quiet
+		return x >= 0 && y >= 0 && x < code.Size && y < code.Size && code.Black(x, y)
+	}
+	n := code.Size + 2*quiet
+	var b strings.Builder
+	for y := 0; y < n; y += 2 {
+		for x := 0; x < n; x++ {
+			top, bot := black(x, y), black(x, y+1)
+			// Light modules are drawn, so the code reads on dark terminals.
+			switch {
+			case !top && !bot:
+				b.WriteString("█")
+			case !top:
+				b.WriteString("▀")
+			case !bot:
+				b.WriteString("▄")
+			default:
+				b.WriteString(" ")
+			}
+		}
+		b.WriteString("\n")
+	}
+	_, err = io.WriteString(w, b.String())
+	return err
+}
+
+func cmdDevice(ctx context.Context, c *api.Client, args []string) error {
+	if len(args) == 0 {
+		args = []string{"ls"}
+	}
+	switch args[0] {
+	case "ls", "list":
+		var ds []core.Device
+		if err := c.Call(ctx, "device.list", nil, &ds); err != nil {
+			return err
+		}
+		w := table()
+		fmt.Fprintln(w, "DEVICE\tNAME\tPAIRED\tLAST SEEN\tSTATUS")
+		for _, d := range ds {
+			seen, status := "never", "active"
+			if d.LastSeen != nil {
+				seen = ago(*d.LastSeen)
+			}
+			if d.RevokedAt != nil {
+				status = "revoked"
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", d.ID, d.Name, ago(d.CreatedAt), seen, status)
+		}
+		return w.Flush()
+	case "revoke", "rm":
+		if err := need(args[1:], 1, "device revoke ID"); err != nil {
+			return err
+		}
+		return c.Call(ctx, "device.revoke", api.IDReq{ID: args[1]}, nil)
+	}
+	return fmt.Errorf("unknown device command %q", args[0])
 }
 
 func cmdStatus(ctx context.Context, c *api.Client) error {

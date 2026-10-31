@@ -41,6 +41,9 @@ func forbiddenf(format string, a ...any) error {
 // Caller is who is making a request: the human owner, or a named agent.
 type Caller struct {
 	Name string `json:"name"`
+	// Device is set when the human is calling from a paired device rather
+	// than with the owner token.
+	Device string `json:"device,omitempty"`
 }
 
 // IsHuman reports whether the caller is the owner.
@@ -149,7 +152,7 @@ func (s *Service) Events(ctx context.Context, after int64, limit int, wait time.
 	if limit <= 0 || limit > 1000 {
 		limit = 100
 	}
-	var out []Event
+	out := []Event{}
 	err := s.waitFor(ctx, wait, func() (bool, error) {
 		rows, err := s.db.QueryContext(ctx, `SELECT id, ts, actor, type, subject, data FROM events WHERE id > ? ORDER BY id LIMIT ?`, after, limit)
 		if err != nil {
@@ -192,6 +195,9 @@ func (s *Service) Authenticate(ctx context.Context, token string) (Caller, error
 	if owner != "" && owner == h {
 		return HumanCaller, nil
 	}
+	if c, ok, err := s.authenticateDevice(ctx, h); err != nil || ok {
+		return c, err
+	}
 	var name string
 	err = s.db.QueryRowContext(ctx, `SELECT name FROM agents WHERE token_hash = ?`, h).Scan(&name)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -201,6 +207,13 @@ func (s *Service) Authenticate(ctx context.Context, token string) (Caller, error
 		return Caller{}, err
 	}
 	return Caller{Name: name}, nil
+}
+
+// LastEventID returns the id of the newest event, or 0.
+func (s *Service) LastEventID(ctx context.Context) (int64, error) {
+	var id sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `SELECT MAX(id) FROM events`).Scan(&id)
+	return id.Int64, err
 }
 
 // MarkStarted records that the daemon started, for the audit trail.

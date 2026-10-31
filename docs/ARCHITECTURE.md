@@ -10,6 +10,9 @@ Sheaf is one Go binary, `sheaf`, that is both the daemon and its clients.
  sheaf hook ─┤  HTTP + bearer token over a Unix socket (0600)
              ▼
         sheaf daemon ── core ── SQLite (WAL): event log + state
+             ▲
+             │  same API + the web queue over TCP (127.0.0.1:7517 by default)
+        phone or browser, paired with `sheaf pair`
                           └──── git worktrees, one per task
 ```
 
@@ -45,6 +48,13 @@ queue. Adapters for other agents' hook systems follow the same shape.
 editing the same checkout, which is the most common collision, at zero cost.
 Containers are planned as an optional isolation level per task.
 
+**The web queue is the same API.** The daemon serves a static page (embedded
+in the binary, no build step, nothing loaded from the network, strict CSP) that
+calls `/v1` with a paired device's bearer token. Live updates are a long poll
+on the event log. Pairing puts the token in the URL fragment, which browsers
+never send to the server; the page moves it to local storage and clears the
+address bar. Bearer tokens rather than cookies mean no CSRF surface.
+
 ## Data model
 
 | Table | Holds |
@@ -54,13 +64,16 @@ Containers are planned as an optional isolation level per task.
 | `tasks` | Title, owner, parent, status, repo, worktree, branch, base commit |
 | `messages` | Sender, recipient, task, kind (message, question, handoff, decision), body, read time |
 | `approvals` | Agent, task, kind (action, diff, question), summary, detail, status, answer |
+| `devices` | Paired phones and browsers: name, token hash, last seen, revoked time |
 
 Tokens are shown once and stored only as hashes. The owner token lives in
 `$SHEAF_HOME/owner.token` (0600).
 
 ## Rules the core enforces
 
-- Only the owner adds or removes agents, sets policies and decides approvals.
+- Only the owner token adds or removes agents, rotates their tokens, sets
+  policies and pairs or revokes devices. Paired devices act as the owner for
+  everything else, such as deciding approvals and messaging agents.
 - Only a task's owner (or you) can move it or hand it off. A handoff changes
   the owner and delivers the note in one transaction.
 - Agents see only their own inbox, the messages they sent, and their own
@@ -80,8 +93,8 @@ many tasks can be resumed when it starts.
 ## Next
 
 1. Status from OSC 7501, so agents that already emit it need no tool calls.
-2. Native desktop app for the queue and diffs; a PWA view through an
-   optional end-to-end encrypted relay for the phone.
+2. Native desktop app for the queue and diffs; an optional end-to-end
+   encrypted relay so the web queue works away from home without a VPN.
 3. Adapters: herdr, tmux, Rex and cmux panes; Codex and OpenCode hooks.
 4. Signed macOS app identity for the daemon, so TCC and Local Network
    consent stick.

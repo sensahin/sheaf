@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#15201B">
+<meta name="referrer" content="no-referrer">
+<title>Sheaf</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="style.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+      <path d="M18 8 Q31 32 18 56" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+      <path d="M46 8 Q33 32 46 56" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+      <path d="M32 6 V58" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+      <rect class="band" x="20" y="27.5" width="24" height="9" rx="4.5"/>
+    </svg>
+    <span class="word">sheaf</span>
+  </div>
+  <span id="conn" class="conn" title="Connecting">connecting</span>
+</header>
+
+<nav class="tabs" id="tabs" hidden>
+  <button data-tab="queue" class="on">Needs you <span id="qcount" class="count" hidden></span></button>
+  <button data-tab="agents">Agents</button>
+  <button data-tab="inbox">Inbox <span id="icount" class="count" hidden></span></button>
+</nav>
+
+<main>
+  <section id="pair" hidden>
+    <h1>Pair this device</h1>
+    <p>On the computer running Sheaf, run:</p>
+    <pre class="cmd">sheaf pair --name phone</pre>
+    <p>Then scan the QR code it prints, or open its link on this device. The link carries a token for this device only, which you can revoke with <code>sheaf device revoke</code>.</p>
+    <p id="pairerr" class="err" hidden></p>
+  </section>
+
+  <section id="queue" hidden>
+    <div id="qlist" class="list"></div>
+    <p id="qempty" class="empty" hidden>Nothing needs you. Your agents are on their own.</p>
+  </section>
+
+  <section id="agents" hidden>
+    <div id="alist" class="list"></div>
+    <p id="aempty" class="empty" hidden>No agents yet. Add one with <code>sheaf agent add</code>.</p>
+  </section>
+
+  <section id="inbox" hidden>
+    <div id="mlist" class="list"></div>
+    <p id="mempty" class="empty" hidden>No messages from your agents.</p>
+  </section>
+</main>
+
+<template id="tpl-approval">
+  <article class="card approval">
+    <div class="meta"><span class="kind"></span><span class="who"></span><span class="age"></span></div>
+    <h2 class="summary"></h2>
+    <details class="detail-wrap" hidden><summary>Details</summary><pre class="detail"></pre></details>
+    <label class="note-label"><span class="sr">Note for the agent</span><textarea class="note" rows="2" placeholder="Note for the agent (optional)"></textarea></label>
+    <div class="actions">
+      <button class="approve primary">Approve</button>
+      <button class="deny">Deny</button>
+      <button class="answer primary" hidden>Send answer</button>
+    </div>
+    <p class="err" hidden></p>
+  </article>
+</template>
+
+<template id="tpl-agent">
+  <article class="card agent">
+    <div class="row"><span class="dot"></span><h2 class="name"></h2><span class="kind"></span></div>
+    <p class="note"></p>
+    <ul class="tasks"></ul>
+  </article>
+</template>
+
+<template id="tpl-message">
+  <article class="card message">
+    <div class="meta"><span class="kind"></span><span class="who"></span><span class="age"></span></div>
+    <p class="body"></p>
+    <form class="reply">
+      <label><span class="sr">Reply</span><textarea rows="2" placeholder="Reply"></textarea></label>
+      <button class="primary" type="submit">Reply</button>
+    </form>
+    <p class="err" hidden></p>
+  </article>
+</template>
+</body>
+</html>

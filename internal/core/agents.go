@@ -50,7 +50,7 @@ type AgentSpec struct {
 // AddAgent registers an agent and returns its token. The token is shown once;
 // only its hash is stored.
 func (s *Service) AddAgent(ctx context.Context, c Caller, spec AgentSpec) (Agent, string, error) {
-	if err := requireHuman(c); err != nil {
+	if err := requireOwnerToken(c); err != nil {
 		return Agent{}, "", err
 	}
 	if !nameRE.MatchString(spec.Name) || spec.Name == Human {
@@ -90,7 +90,7 @@ func (s *Service) AddAgent(ctx context.Context, c Caller, spec AgentSpec) (Agent
 
 // RotateToken issues a new token for an agent, revoking the old one.
 func (s *Service) RotateToken(ctx context.Context, c Caller, name string) (string, error) {
-	if err := requireHuman(c); err != nil {
+	if err := requireOwnerToken(c); err != nil {
 		return "", err
 	}
 	token := config.NewToken("sha_")
@@ -110,7 +110,7 @@ func (s *Service) RotateToken(ctx context.Context, c Caller, name string) (strin
 // RemoveAgent deletes an agent. Its tasks keep their history but lose their
 // owner.
 func (s *Service) RemoveAgent(ctx context.Context, c Caller, name string) error {
-	if err := requireHuman(c); err != nil {
+	if err := requireOwnerToken(c); err != nil {
 		return err
 	}
 	return s.tx(ctx, func(tx *sql.Tx) error {
@@ -135,7 +135,7 @@ func (s *Service) ListAgents(ctx context.Context) ([]Agent, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Agent
+	out := []Agent{}
 	for rows.Next() {
 		a, err := scanAgent(rows)
 		if err != nil {
