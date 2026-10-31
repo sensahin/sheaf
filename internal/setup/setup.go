@@ -85,21 +85,51 @@ func jsonText(v any) string {
 	return b.String()
 }
 
-func preToolUse(command string, extra map[string]any) string {
+// StatusTimeout bounds a status hook, in seconds: it only posts one report.
+const StatusTimeout = 10
+
+func preToolUse(command string, extra map[string]any, status map[string]string, sheaf string) string {
 	h := map[string]any{"type": "command", "command": command, "timeout": HookTimeout}
 	for k, v := range extra {
 		h[k] = v
 	}
-	return jsonText(map[string]any{"hooks": map[string]any{
+	events := map[string]any{
 		"PreToolUse": []any{map[string]any{"matcher": "*", "hooks": []any{h}}},
-	}})
+	}
+	for ev, g := range statusGroups(sheaf, status, StatusTimeout) {
+		events[ev] = g
+	}
+	return jsonText(map[string]any{"hooks": events})
+}
+
+// statusGroups builds Claude-shaped hook groups that report a status when an
+// agent event fires: event name -> Sheaf state.
+func statusGroups(sheaf string, status map[string]string, timeout int) map[string]any {
+	out := map[string]any{}
+	for ev, state := range status {
+		out[ev] = []any{map[string]any{"hooks": []any{map[string]any{
+			"type": "command", "command": sheaf + " hook status " + state, "timeout": timeout,
+		}}}}
+	}
+	return out
+}
+
+// claudeStatus is the status reporting for agents with Claude Code's events:
+// a prompt starts work, a notification means it waits on you (a permission
+// prompt or a question), a finished tool call means it is back at work, and
+// the end of a turn leaves it idle.
+var claudeStatus = map[string]string{
+	"UserPromptSubmit": "working",
+	"PostToolUse":      "working",
+	"Notification":     "blocked",
+	"Stop":             "idle",
 }
 
 func claudeCode(sheaf string) Plan {
 	cmd := sheaf + " hook claude-code"
 	return Plan{
 		Kind:  "claude-code",
-		Files: []File{{Path: ".claude/settings.json", Content: preToolUse(cmd, nil), Marker: "hook claude-code"}},
+		Files: []File{{Path: ".claude/settings.json", Content: preToolUse(cmd, nil, claudeStatus, sheaf), Marker: "hook claude-code"}},
 		Steps: []string{"claude mcp add --scope user sheaf -- " + sheaf + " mcp"},
 	}
 }
@@ -109,9 +139,10 @@ func codex(sheaf string) Plan {
 	return Plan{
 		Kind: "codex",
 		Files: []File{{
-			Path:    ".codex/hooks.json",
-			Content: preToolUse(cmd, map[string]any{"statusMessage": "Checking with Sheaf"}),
-			Marker:  "hook codex",
+			Path: ".codex/hooks.json",
+			Content: preToolUse(cmd, map[string]any{"statusMessage": "Checking with Sheaf"},
+				map[string]string{"UserPromptSubmit": "working", "Stop": "idle"}, sheaf),
+			Marker: "hook codex",
 		}},
 		Steps: []string{
 			"Add Sheaf's MCP server to ~/.codex/config.toml:\n\n" +
@@ -150,7 +181,10 @@ func copilot(sheaf string) Plan {
 		Files: []File{{
 			Path: ".github/hooks/sheaf.json",
 			Content: jsonText(map[string]any{"version": 1, "hooks": map[string]any{
-				"preToolUse": []any{map[string]any{"type": "command", "bash": cmd, "timeoutSec": HookTimeout}},
+				"preToolUse":          []any{map[string]any{"type": "command", "bash": cmd, "timeoutSec": HookTimeout}},
+				"userPromptSubmitted": []any{map[string]any{"type": "command", "bash": sheaf + " hook status working", "timeoutSec": StatusTimeout}},
+				"notification":        []any{map[string]any{"type": "command", "bash": sheaf + " hook status blocked", "timeoutSec": StatusTimeout}},
+				"agentStop":           []any{map[string]any{"type": "command", "bash": sheaf + " hook status idle", "timeoutSec": StatusTimeout}},
 			}}),
 			Marker: "hook copilot",
 			Owned:  true,
@@ -172,6 +206,7 @@ func cursor(sheaf string) Plan {
 				Path: ".cursor/hooks.json",
 				Content: jsonText(map[string]any{"version": 1, "hooks": map[string]any{
 					"preToolUse": []any{map[string]any{"command": sheaf + " hook cursor", "timeout": HookTimeout}},
+					"stop":       []any{map[string]any{"command": sheaf + " hook status idle", "timeout": StatusTimeout}},
 				}}),
 				Marker: "hook cursor",
 			},
@@ -193,13 +228,7 @@ func gemini(sheaf string) Plan {
 		Files: []File{{
 			Path: ".gemini/settings.json",
 			Content: jsonText(map[string]any{
-				"hooks": map[string]any{"BeforeTool": []any{map[string]any{
-					"matcher": ".*",
-					"hooks": []any{map[string]any{
-						"type": "command", "name": "sheaf", "command": sheaf + " hook gemini",
-						"timeout": HookTimeout * 1000, // milliseconds
-					}},
-				}}},
+				"hooks": geminiHooks(sheaf),
 				"mcpServers": map[string]any{"sheaf": map[string]any{
 					"command": sheaf, "args": []string{"mcp"},
 					"env": map[string]string{"SHEAF_TOKEN": "$SHEAF_TOKEN", "SHEAF_HOME": "$SHEAF_HOME"},
@@ -211,6 +240,21 @@ func gemini(sheaf string) Plan {
 	}
 }
 
+func geminiHooks(sheaf string) map[string]any {
+	// Gemini's timeouts are in milliseconds.
+	hooks := statusGroups(sheaf, map[string]string{
+		"BeforeAgent": "working", "Notification": "blocked", "AfterAgent": "idle",
+	}, StatusTimeout*1000)
+	hooks["BeforeTool"] = []any{map[string]any{
+		"matcher": ".*",
+		"hooks": []any{map[string]any{
+			"type": "command", "name": "sheaf", "command": sheaf + " hook gemini",
+			"timeout": HookTimeout * 1000,
+		}},
+	}}
+	return hooks
+}
+
 func droid(sheaf string) Plan {
 	h := map[string]any{"type": "command", "command": sheaf + " hook droid", "timeout": HookTimeout}
 	return Plan{
@@ -218,9 +262,11 @@ func droid(sheaf string) Plan {
 		Files: []File{{
 			// A standalone hooks.json keys events directly.
 			Path: ".factory/hooks.json",
-			Content: jsonText(map[string]any{
-				"PreToolUse": []any{map[string]any{"matcher": "*", "hooks": []any{h}}},
-			}),
+			Content: jsonText(func() map[string]any {
+				events := statusGroups(sheaf, claudeStatus, StatusTimeout)
+				events["PreToolUse"] = []any{map[string]any{"matcher": "*", "hooks": []any{h}}}
+				return events
+			}()),
 			Marker: "hook droid",
 		}},
 		Steps: []string{"droid mcp add sheaf \"" + sheaf + " mcp\"   (or add Sheaf as an MCP server with /mcp in Droid)"},
@@ -325,6 +371,7 @@ func goose(sheaf string) Plan {
 					"PreToolUse": []any{map[string]any{"hooks": []any{map[string]any{
 						"type": "command", "command": sheaf + " hook goose", "timeout": HookTimeout,
 					}}}},
+					"Stop": statusGroups(sheaf, map[string]string{"Stop": "idle"}, StatusTimeout)["Stop"],
 				}}),
 				Marker: "hook goose",
 				Owned:  true,

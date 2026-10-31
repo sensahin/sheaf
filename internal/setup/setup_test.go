@@ -101,3 +101,26 @@ func TestClineHookIsExecutable(t *testing.T) {
 		t.Fatalf("script: %s", b)
 	}
 }
+
+func TestStatusHooks(t *testing.T) {
+	for kind, want := range map[string][]string{
+		"claude-code": {`"UserPromptSubmit"`, `"Notification"`, `"Stop"`, "hook status blocked"},
+		"codex":       {`"Stop"`, "hook status idle"},
+		"copilot":     {`"agentStop"`, `"userPromptSubmitted"`},
+		"cursor":      {`"stop"`},
+		"gemini":      {`"AfterAgent"`, `"BeforeAgent"`, `"timeout": 10000`},
+		"droid":       {`"Notification"`, `"Stop"`},
+		"goose":       {`"Stop"`},
+	} {
+		p, _ := For(kind, "sheaf")
+		all := ""
+		for _, f := range p.Files {
+			all += f.Content
+		}
+		for _, w := range want {
+			if !strings.Contains(all, w) {
+				t.Errorf("%s: config lacks %s", kind, w)
+			}
+		}
+	}
+}
