@@ -1,3 +1,4 @@
 /sheaf
 *.db
 *.db-*
+/dist

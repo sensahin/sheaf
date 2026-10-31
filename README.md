@@ -30,10 +30,23 @@ messages never leave your machine.
 > for other terminals are next. See
 > [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## Quick start
+## Install
+
+Download the archive for your system from
+[Releases](https://github.com/sensahin/sheaf/releases), check it against
+`checksums.txt`, and put `sheaf` on your PATH. It is a single binary with no
+dependencies. Or, with Go installed:
 
 ```sh
 go install github.com/sensahin/sheaf/cmd/sheaf@latest
+```
+
+macOS and Linux are fully supported. Windows builds are experimental:
+`sheaf run` is not available there yet.
+
+## Quick start
+
+```sh
 
 sheaf init
 sheaf daemon &                      # or run it under launchd / systemd
@@ -179,7 +192,10 @@ needs your approval.
 ```sh
 go build ./cmd/sheaf
 go test ./...
+scripts/build-release.sh v0.1.0   # all platforms, into dist/
 ```
+
+Pushing a `v*` tag builds every platform and publishes a GitHub release.
 
 ## Contributing
 
