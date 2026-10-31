@@ -81,7 +81,7 @@ func claudeCall(in PreToolUseInput) (Call, bool) {
 	case "Read", "Glob", "Grep", "LS", "TodoWrite", "TodoRead":
 		return Call{}, false
 	default:
-		if strings.HasPrefix(in.ToolName, "mcp__sheaf__") {
+		if isSheafTool(in.ToolName) {
 			return Call{}, false
 		}
 		c.Action, c.Targets = core.ActionTool, []string{in.ToolName}

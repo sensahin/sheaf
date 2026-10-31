@@ -75,8 +75,9 @@ Recovery and audit
   sheaf log [--follow] [--after N]
 
 Launching agents
-  sheaf setup claude-code|codex|opencode [--print]
-                                   connect an agent program in this project
+  sheaf setup KIND [--print]       connect an agent program in this project
+                                   (claude-code, codex, copilot, cursor,
+                                   gemini, opencode)
   sheaf start AGENT [--task T] [--here] [-- CMD]
                                    open the agent in a tmux window (or here),
                                    with its status tracked
@@ -87,7 +88,7 @@ For agents
                                    run an agent and report the status it
                                    prints (OSC 7501)
   sheaf mcp                        MCP server on stdio (needs SHEAF_TOKEN)
-  sheaf hook claude-code|codex|opencode [--wait SECONDS]
+  sheaf hook KIND [--wait SECONDS]
                                    pre-tool hook that routes to your queue
 
 State lives in $SHEAF_HOME (default ~/.sheaf).
@@ -572,7 +573,7 @@ func cmdAgent(ctx context.Context, paths config.Paths, c *api.Client, args []str
 }
 
 func printAgentSetup(paths config.Paths, name, kind, token string) {
-	connect := "Connect your agent program to Sheaf once per project, for example:\n\n  sheaf setup claude-code    (or codex, opencode)"
+	connect := "Connect your agent program to Sheaf once per project, for example:\n\n  sheaf setup claude-code    (or codex, copilot, cursor, gemini, opencode)"
 	if _, err := setup.For(kind, ""); err == nil {
 		connect = "Connect " + kind + " to Sheaf once per project:\n\n  sheaf setup " + kind
 	}
@@ -1017,13 +1018,9 @@ func cmdLog(ctx context.Context, c *api.Client, args []string) error {
 }
 
 func cmdHook(ctx context.Context, c *api.Client, args []string) error {
-	hooks := map[string]func(context.Context, *api.Client, io.Reader, time.Duration) ([]byte, error){
-		"claude-code": hook.ClaudeCode,
-		"codex":       hook.Codex,
-		"opencode":    hook.OpenCode,
-	}
+	hooks := hook.Adapters
 	if len(args) == 0 || hooks[args[0]] == nil {
-		return fmt.Errorf("usage: sheaf hook claude-code|codex|opencode [--wait SECONDS]")
+		return fmt.Errorf("usage: sheaf hook %s [--wait SECONDS]", strings.Join(setup.Kinds(), "|"))
 	}
 	fs := flag.NewFlagSet("hook", flag.ContinueOnError)
 	wait := fs.Int("wait", 600, "seconds to wait for your decision before falling back to the agent's own prompt")

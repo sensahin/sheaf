@@ -288,3 +288,39 @@ func TestCodexAndOpenCodeHooks(t *testing.T) {
 		t.Fatalf("opencode read: %+v", o)
 	}
 }
+
+// TestEveryAdapterAnswersInItsOwnFormat feeds each agent's payload for a
+// denied command and checks the answer is that agent's deny.
+func TestEveryAdapterAnswersInItsOwnFormat(t *testing.T) {
+	ctx := context.Background()
+	client := daemon(t)
+	var a api.AddAgentResp
+	if err := client("owner").Call(ctx, "agent.add", core.AgentSpec{Name: "a"}, &a); err != nil {
+		t.Fatal(err)
+	}
+	agent := client(a.Token)
+	cmd := "git push --force origin main"
+	cases := map[string]struct{ in, deny, allow string }{
+		"claude-code": {`{"tool_name":"Bash","tool_input":{"command":"CMD"},"cwd":"/tmp"}`, `"permissionDecision":"deny"`, ""},
+		"codex":       {`{"tool_name":"Bash","tool_input":{"command":"CMD"},"cwd":"/tmp"}`, `"permissionDecision":"deny"`, ""},
+		"copilot":     {`{"toolName":"bash","toolArgs":{"command":"CMD"},"cwd":"/tmp","timestamp":1}`, `"permissionDecision":"deny"`, ""},
+		"cursor":      {`{"tool_name":"Shell","tool_input":{"command":"CMD"},"cwd":"/tmp","hook_event_name":"preToolUse"}`, `"permission":"deny"`, "{}"},
+		"gemini":      {`{"tool_name":"run_shell_command","tool_input":{"command":"CMD"},"cwd":"/tmp","hook_event_name":"BeforeTool"}`, `"decision":"deny"`, ""},
+		"opencode":    {`{"tool":"bash","args":{"command":"CMD"},"cwd":"/tmp"}`, `"decision":"deny"`, `{"decision":""}`},
+	}
+	for kind, adapter := range hook.Adapters {
+		tc, ok := cases[kind]
+		if !ok {
+			t.Errorf("no test case for adapter %s", kind)
+			continue
+		}
+		out, err := adapter(ctx, agent, strings.NewReader(strings.ReplaceAll(tc.in, "CMD", cmd)), time.Second)
+		if err != nil || !strings.Contains(string(out), tc.deny) {
+			t.Errorf("%s deny: %s %v", kind, out, err)
+		}
+		out, err = adapter(ctx, agent, strings.NewReader(strings.ReplaceAll(tc.in, "CMD", "go test ./...")), time.Second)
+		if err != nil || string(out) != tc.allow {
+			t.Errorf("%s allow: got %q want %q (%v)", kind, out, tc.allow, err)
+		}
+	}
+}

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sensahin/sheaf/internal/hook"
 )
 
 func TestPlansAreValid(t *testing.T) {
@@ -58,5 +60,21 @@ func TestApplyNeverRewritesAgentConfig(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(cfg); string(b) != mine {
 		t.Fatalf("opencode.json rewritten: %s", b)
+	}
+}
+
+func TestEveryKindHasAHook(t *testing.T) {
+	for _, kind := range Kinds() {
+		if hook.Adapters[kind] == nil {
+			t.Errorf("sheaf setup %s writes a hook that `sheaf hook %s` does not serve", kind, kind)
+		}
+		p, _ := For(kind, "sheaf")
+		found := false
+		for _, f := range p.Files {
+			found = found || strings.Contains(f.Content, "hook "+kind)
+		}
+		if !found {
+			t.Errorf("%s: no file runs `sheaf hook %s`", kind, kind)
+		}
 	}
 }
