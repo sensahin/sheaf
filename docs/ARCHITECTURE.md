@@ -112,8 +112,8 @@ many tasks can be resumed when it starts.
 
 1. The remaining adapters, before the desktop app: Kiro hooks (format to
    confirm on a real install), Goose and Amp plugins. Agent hook events (stop, notification)
-   feed status, not just approvals. Terminal adapters: herdr, Rex and cmux
-   panes. A Homebrew tap.
+   feed status, not just approvals. Terminal adapters: Rex and cmux panes
+   (herdr status and resume are done). A Homebrew tap.
 2. Native desktop app for the queue and diffs; an optional end-to-end
    encrypted relay so the web queue works away from home without a VPN.
 3. Signed macOS app identity for the daemon, so TCC and Local Network
