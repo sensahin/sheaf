@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sheaf: many agents, one agreement</title>
+<meta name="description" content="Sheaf is an open-source, local-first coordination layer for AI coding agents: real messaging, worktrees and permissions, work that survives a reboot, and one queue for what needs you.">
+<meta property="og:title" content="Sheaf: many agents, one agreement">
+<meta property="og:description" content="Open-source coordination for AI coding agents. Messaging, permissions, reboot-safe work and one approval queue, all on your machine.">
+<meta property="og:image" content="https://sensahin.github.io/sheaf/desktop-queue.png">
+<meta name="theme-color" content="#15201B">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+:root {
+  --bg: #F6F7F4; --surface: #FFFFFF; --ink: #15201B; --muted: #5B6660; --line: #DDE1DA;
+  --band: #D9962B; --band-soft: #F5E6CB; --signal: #2F7D4F; --code: #15201B; --code-ink: #E8ECE6;
+  --max: 1080px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0F1513; --surface: #17201C; --ink: #E8ECE6; --muted: #9AA59E; --line: #26322C;
+    --band: #E8B04D; --band-soft: #2E2716; --signal: #5DBB82; --code: #0A0F0D; --code-ink: #E8ECE6;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 17px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+a { color: inherit; }
+code, pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 14px; }
+.wrap { max-width: var(--max); margin: 0 auto; padding: 0 20px; }
+
+header.nav { display: flex; align-items: center; justify-content: space-between; padding: 18px 0; }
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+.brand svg { width: 30px; height: 30px; }
+.brand .s { stroke: var(--ink); }
+.brand .b { fill: var(--band); }
+.brand span { font-weight: 750; font-size: 22px; letter-spacing: -0.03em; }
+.nav nav { display: flex; gap: 22px; font-size: 15px; }
+.nav nav a { text-decoration: none; color: var(--muted); }
+.nav nav a:hover { color: var(--ink); }
+
+.hero { padding: 56px 0 32px; text-align: center; }
+.eyebrow { display: inline-block; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; }
+h1 { font-size: clamp(40px, 7vw, 72px); line-height: 1.02; letter-spacing: -0.04em; margin: 20px auto 18px; max-width: 13ch; }
+h1 em { font-style: normal; background: linear-gradient(transparent 62%, var(--band-soft) 62%); }
+.lede { font-size: 20px; color: var(--muted); max-width: 40em; margin: 0 auto 30px; }
+.cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+.btn { display: inline-flex; align-items: center; gap: 8px; font-weight: 650; text-decoration: none;
+  padding: 12px 20px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); }
+.btn.primary { background: var(--band); border-color: var(--band); color: #15201B; }
+.install { margin: 28px auto 0; max-width: 560px; text-align: left; }
+
+pre.term { background: var(--code); color: var(--code-ink); border-radius: 12px; padding: 16px 18px; overflow-x: auto; margin: 0; line-height: 1.6; }
+pre.term .c { color: #8D978F; }
+pre.term .p { color: var(--band); user-select: none; }
+
+.shot { margin: 48px auto 0; max-width: 980px; }
+.shot img { width: 100%; height: auto; display: block; border-radius: 14px; border: 1px solid var(--line);
+  box-shadow: 0 30px 60px -30px rgba(21, 32, 27, 0.35); }
+
+section { padding: 72px 0 0; }
+h2 { font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.03em; line-height: 1.1; margin: 0 0 14px; }
+.sub { color: var(--muted); max-width: 42em; margin: 0 0 32px; font-size: 18px; }
+
+.grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 22px; }
+.card h3 { font-size: 18px; margin: 10px 0 6px; letter-spacing: -0.01em; }
+.card p { margin: 0; color: var(--muted); font-size: 16px; }
+.icon { width: 36px; height: 36px; border-radius: 9px; background: var(--band-soft); display: grid; place-items: center; }
+.icon svg { width: 20px; height: 20px; stroke: var(--ink); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+.steps { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); counter-reset: step; }
+.step { counter-increment: step; }
+.step h3 { font-size: 18px; margin: 0 0 8px; display: flex; gap: 10px; align-items: baseline; }
+.step h3::before { content: counter(step); display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--band); color: #15201B; font-size: 14px; flex: none; }
+.step p { color: var(--muted); margin: 0 0 12px; font-size: 16px; }
+
+.agents { display: flex; flex-wrap: wrap; gap: 10px; }
+.agents span { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 6px 14px; font-size: 15px; font-weight: 550; }
+.agents span.t { background: transparent; color: var(--muted); }
+
+.split { display: grid; gap: 32px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; }
+@media (max-width: 820px) { .split { grid-template-columns: 1fr; } .nav nav a.hide { display: none; } }
+.check { list-style: none; padding: 0; margin: 0; }
+.check li { padding: 8px 0 8px 30px; position: relative; border-top: 1px solid var(--line); }
+.check li:first-child { border-top: 0; }
+.check li::before { content: ""; position: absolute; left: 4px; top: 15px; width: 12px; height: 7px;
+  border-left: 2.5px solid var(--signal); border-bottom: 2.5px solid var(--signal); transform: rotate(-45deg); }
+
+.tabs { display: flex; gap: 6px; margin: 0 0 10px; flex-wrap: wrap; }
+.tabs button { font: inherit; font-size: 14px; font-weight: 600; border: 1px solid var(--line); background: var(--surface); color: var(--muted);
+  padding: 6px 14px; border-radius: 8px; cursor: pointer; }
+.tabs button[aria-selected="true"] { color: #15201B; background: var(--band); border-color: var(--band); }
+.panel[hidden] { display: none; }
+.note { font-size: 15px; color: var(--muted); margin: 10px 0 0; }
+
+footer { margin-top: 96px; border-top: 1px solid var(--line); padding: 28px 0 48px; color: var(--muted); font-size: 15px;
+  display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="nav">
+    <a class="brand" href="#" aria-label="Sheaf home">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><path class="s" d="M18 8 Q31 32 18 56" fill="none" stroke-width="5" stroke-linecap="round"/><path class="s" d="M46 8 Q33 32 46 56" fill="none" stroke-width="5" stroke-linecap="round"/><path class="s" d="M32 6 V58" fill="none" stroke-width="5" stroke-linecap="round"/><rect class="b" x="20" y="27.5" width="24" height="9" rx="4.5"/></svg>
+      <span>sheaf</span>
+    </a>
+    <nav>
+      <a class="hide" href="#why">Why</a>
+      <a class="hide" href="#agents">Agents</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/sensahin/sheaf">GitHub</a>
+    </nav>
+  </header>
+
+  <div class="hero">
+    <span class="eyebrow">Open source · local-first · Apache-2.0</span>
+    <h1>Many agents. <em>One agreement.</em></h1>
+    <p class="lede">Sheaf is the coordination layer for your AI coding agents. They message each other instead of typing into each other's terminals, work in their own worktrees under your rules, pick up where they left off after a reboot, and bring everything that needs you to one queue.</p>
+    <div class="cta">
+      <a class="btn primary" href="#install">Install Sheaf</a>
+      <a class="btn" href="https://github.com/sensahin/sheaf/releases">Download the desktop app</a>
+      <a class="btn" href="https://github.com/sensahin/sheaf">View on GitHub</a>
+    </div>
+    <div class="install">
+<pre class="term"><span class="p">$ </span>brew tap sensahin/sheaf https://github.com/sensahin/sheaf
+<span class="p">$ </span>brew install sensahin/sheaf/sheaf</pre>
+    </div>
+  </div>
+
+  <div class="shot">
+    <img src="desktop-queue.png" width="1280" height="820" alt="The Sheaf desktop app showing a diff from an agent, file by file with line numbers, waiting for approval">
+  </div>
+
+  <section id="why">
+    <h2>What a terminal multiplexer can't do</h2>
+    <p class="sub">Sheaf sits under whatever you already use, whether that's tmux, herdr, cmux, Rex or a plain shell, and adds the layer agents need to work together safely.</p>
+    <div class="grid">
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24"><path d="M4 5h16v10H8l-4 4z"/></svg></div>
+        <h3>Real messaging</h3>
+        <p>Agents send messages, questions and handoffs through MCP tools, with read receipts. Nothing lands in a half-written prompt.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></div>
+        <h3>Worktrees and permissions</h3>
+        <p>Every task gets its own git worktree, and every agent gets its own token and policy. A push or a sudo waits for you. A force push is refused.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg></div>
+        <h3>Survives a reboot</h3>
+        <p>Every message, handoff and decision is written to an event log first. After a crash, <code>sheaf resume</code> brings each agent back to its unfinished task.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg></div>
+        <h3>One queue for you</h3>
+        <p>Approvals, questions and diffs from every agent arrive in one place: the desktop app, your phone, or <code>sheaf queue</code>.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>How it works</h2>
+    <p class="sub">Three commands, then you only hear from your agents when they need you.</p>
+    <div class="steps">
+      <div class="step">
+        <h3>Connect your agents</h3>
+        <p>Once per project, Sheaf writes the agent's hook and MCP config. It never rewrites a config you already have.</p>
+<pre class="term"><span class="p">$ </span>sheaf setup claude-code
+<span class="p">$ </span>sheaf setup codex</pre>
+      </div>
+      <div class="step">
+        <h3>Start them through Sheaf</h3>
+        <p>Each agent gets a tmux window (or runs in place in herdr, cmux or Rex), with its status tracked from the start.</p>
+<pre class="term"><span class="p">$ </span>sheaf start planner
+<span class="p">$ </span>sheaf start builder --task t-7xa6x441</pre>
+      </div>
+      <div class="step">
+        <h3>Decide what matters</h3>
+        <p>A push, a review or a question waits in your queue. Approve from your desk, your phone or the terminal.</p>
+<pre class="term"><span class="p">$ </span>sheaf queue
+<span class="c">a-3k9d2m1x  builder  git push origin sheaf/…</span>
+<span class="p">$ </span>sheaf approve a-3k9d2m1x</pre>
+      </div>
+    </div>
+  </section>
+
+  <section id="agents">
+    <h2>Works with the agents you use</h2>
+    <p class="sub">Hooks hold risky tool calls for your approval, and MCP gives every agent the same way to talk to the others. Anything else runs under <code>sheaf run</code>.</p>
+    <div class="agents">
+      <span>Claude Code</span><span>Codex</span><span>OpenCode</span><span>GitHub Copilot CLI</span><span>Cursor</span>
+      <span>Gemini CLI</span><span>Qwen Code</span><span>Factory Droid</span><span>Antigravity</span><span>Cline</span>
+      <span>Windsurf</span><span>goose</span><span>Amp</span><span>Kiro</span><span>Junie</span><span>Aider</span>
+      <span class="t">tmux</span><span class="t">herdr</span><span class="t">cmux</span><span class="t">Rex</span>
+    </div>
+    <p class="note">What each agent gets is in the <a href="https://github.com/sensahin/sheaf/blob/main/docs/agents.md">agent guide</a>.</p>
+  </section>
+
+  <section>
+    <div class="split">
+      <div>
+        <h2>Yours, on your machine</h2>
+        <p class="sub">There's no account, no cloud, and no telemetry. One small Go binary runs the daemon and the CLI, with SQLite for the log.</p>
+        <ul class="check">
+          <li>Agents hold a token, never your database, and the daemon decides what each token may do.</li>
+          <li>Every permission check is logged with its decision and reason.</li>
+          <li>Each paired phone has its own token, and you can revoke it in one command.</li>
+          <li>Apache-2.0, built in the open.</li>
+        </ul>
+      </div>
+<pre class="term"><span class="c"># policy: the strictest matching rule wins</span>
+{
+  "default": "allow",
+  "rules": [
+    {"action": "shell", "match": "git push --force*", "effect": "deny"},
+    {"action": "shell", "match": "git push*", "effect": "ask"},
+    {"action": "shell", "match": "sudo *", "effect": "ask"},
+    {"action": "secret", "match": "*", "effect": "ask"}
+  ]
+}</pre>
+    </div>
+  </section>
+
+  <section id="install">
+    <h2>Install</h2>
+    <p class="sub">macOS and Linux, on x86 and Arm. Windows builds are available and less tested.</p>
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected="true" aria-controls="p-brew" id="t-brew">Homebrew</button>
+      <button role="tab" aria-selected="false" aria-controls="p-app" id="t-app">Desktop app</button>
+      <button role="tab" aria-selected="false" aria-controls="p-bin" id="t-bin">Binary</button>
+      <button role="tab" aria-selected="false" aria-controls="p-go" id="t-go">From source</button>
+    </div>
+    <div class="panel" id="p-brew" role="tabpanel" aria-labelledby="t-brew">
+<pre class="term"><span class="p">$ </span>brew tap sensahin/sheaf https://github.com/sensahin/sheaf
+<span class="p">$ </span>brew install sensahin/sheaf/sheaf
+<span class="p">$ </span>brew services start sheaf   <span class="c"># run the daemon now and at login</span></pre>
+    </div>
+    <div class="panel" id="p-app" role="tabpanel" aria-labelledby="t-app" hidden>
+<pre class="term"><span class="c"># macOS (Apple Silicon and Intel), Linux and Windows</span>
+<span class="c"># Download from github.com/sensahin/sheaf/releases.</span>
+<span class="c"># The app includes the sheaf CLI and starts the daemon for you.</span></pre>
+      <p class="note"><a href="https://github.com/sensahin/sheaf/releases">Go to the latest release</a></p>
+    </div>
+    <div class="panel" id="p-bin" role="tabpanel" aria-labelledby="t-bin" hidden>
+<pre class="term"><span class="c"># one binary, no dependencies</span>
+<span class="p">$ </span>tar xzf sheaf_*_darwin_arm64.tar.gz
+<span class="p">$ </span>sudo mv sheaf_*/sheaf /usr/local/bin/</pre>
+    </div>
+    <div class="panel" id="p-go" role="tabpanel" aria-labelledby="t-go" hidden>
+<pre class="term"><span class="p">$ </span>go install github.com/sensahin/sheaf/cmd/sheaf@latest</pre>
+    </div>
+<pre class="term" style="margin-top:16px"><span class="c"># then, in any project</span>
+<span class="p">$ </span>sheaf init
+<span class="p">$ </span>sheaf agent add planner --kind claude-code --resume "claude --continue"
+<span class="p">$ </span>sheaf setup claude-code
+<span class="p">$ </span>sheaf start planner</pre>
+  </section>
+
+  <footer>
+    <span>Sheaf is open source under the Apache License 2.0.</span>
+    <span><a href="https://github.com/sensahin/sheaf">GitHub</a> · <a href="https://github.com/sensahin/sheaf/blob/main/docs/agents.md">Agents</a> · <a href="https://github.com/sensahin/sheaf/blob/main/docs/ARCHITECTURE.md">Architecture</a> · <a href="https://github.com/sensahin/sheaf/releases">Releases</a></span>
+  </footer>
+</div>
+<script>
+for (const b of document.querySelectorAll('[role="tab"]')) {
+  b.addEventListener('click', () => {
+    for (const o of document.querySelectorAll('[role="tab"]')) {
+      const on = o === b;
+      o.setAttribute('aria-selected', on);
+      document.getElementById(o.getAttribute('aria-controls')).hidden = !on;
+    }
+  });
+}
+</script>
+</body>
+</html>
