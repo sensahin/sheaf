@@ -49,10 +49,20 @@ exit 3`
 		t.Errorf("output not passed through: %q", out.String())
 	}
 
-	// Reports are latest-wins, so intermediate ones may be skipped, but the
-	// last two are always the agent's final status and its exit.
+	// Repeats of one state may collapse, but every change of state arrives
+	// in order: working, blocked, done, then the exit.
 	if len(got) < 2 {
 		t.Fatalf("reports: %+v", got)
+	}
+	var states []string
+	for _, r := range got {
+		states = append(states, r.State)
+	}
+	if strings.Join(states, ",") != "working,blocked,done,idle" {
+		t.Errorf("states %v", states)
+	}
+	if got[1].Note != "needs permission: Allow git push?" || got[1].Task != "t-1" {
+		t.Errorf("blocked report: %+v", got[1])
 	}
 	last, exit := got[len(got)-2], got[len(got)-1]
 	if last.State != core.StateDone || last.Task != "t-1" {
@@ -85,4 +95,27 @@ func TestFromOSCNotes(t *testing.T) {
 
 func oscStatus(state, kind, msg, progress string) osc.Status {
 	return osc.Status{State: state, Kind: kind, Msg: msg, Progress: progress}
+}
+
+func TestReporterKeepsStateChangesWhenDaemonIsSlow(t *testing.T) {
+	release := make(chan struct{})
+	var got []string
+	r := newReporter(context.Background(), "t-1", func(_ context.Context, s core.StatusReport) error {
+		<-release // the daemon is stuck until everything below has been set
+		got = append(got, s.State+":"+s.Note)
+		return nil
+	})
+	r.set(core.StatusReport{State: core.StateWorking, Note: "10%"})
+	r.set(core.StatusReport{State: core.StateWorking, Note: "20%"})
+	r.set(core.StatusReport{State: core.StateWorking, Note: "90%"})
+	r.set(core.StatusReport{State: core.StateDone})
+	r.set(core.StatusReport{State: core.StateIdle, Note: "exited"})
+	close(release)
+	r.close()
+	// The first report may have been picked up before the rest arrived.
+	want1 := "working:90%,done:,idle:exited"
+	want2 := "working:10%," + want1
+	if j := strings.Join(got, ","); j != want1 && j != want2 {
+		t.Fatalf("got %s", j)
+	}
 }

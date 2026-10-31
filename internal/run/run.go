@@ -147,19 +147,24 @@ func joinNote(a, b string) string {
 	return a + " " + b
 }
 
-// reporter sends the latest status in the background, skipping repeats, so a
-// chatty agent never waits on the daemon.
+// reporter sends statuses in the background, so a chatty agent never waits
+// on the daemon. Consecutive reports with the same state collapse to the
+// latest (progress updates), but every change of state is sent, in order, so
+// a "done" right before exit still moves the task.
 type reporter struct {
-	ctx    context.Context
-	task   string
-	send   func(context.Context, core.StatusReport) error
-	mu     sync.Mutex
-	next   *core.StatusReport
-	last   core.StatusReport
-	wake   chan struct{}
-	done   chan struct{}
-	closed bool
+	ctx     context.Context
+	task    string
+	send    func(context.Context, core.StatusReport) error
+	mu      sync.Mutex
+	pending []core.StatusReport
+	last    core.StatusReport
+	wake    chan struct{}
+	done    chan struct{}
+	closed  bool
 }
+
+// maxPending bounds the backlog when the daemon is slow or down.
+const maxPending = 64
 
 func newReporter(ctx context.Context, task string, send func(context.Context, core.StatusReport) error) *reporter {
 	r := &reporter{ctx: ctx, task: task, send: send, wake: make(chan struct{}, 1), done: make(chan struct{})}
@@ -169,8 +174,19 @@ func newReporter(ctx context.Context, task string, send func(context.Context, co
 
 func (r *reporter) set(s core.StatusReport) {
 	r.mu.Lock()
-	r.next = &s
+	if n := len(r.pending); n > 0 && r.pending[n-1].State == s.State {
+		r.pending[n-1] = s
+	} else {
+		r.pending = append(r.pending, s)
+		if len(r.pending) > maxPending {
+			r.pending = r.pending[1:]
+		}
+	}
 	r.mu.Unlock()
+	r.poke()
+}
+
+func (r *reporter) poke() {
 	select {
 	case r.wake <- struct{}{}:
 	default:
@@ -181,10 +197,7 @@ func (r *reporter) close() {
 	r.mu.Lock()
 	r.closed = true
 	r.mu.Unlock()
-	select {
-	case r.wake <- struct{}{}:
-	default:
-	}
+	r.poke()
 	<-r.done
 }
 
@@ -192,17 +205,20 @@ func (r *reporter) loop() {
 	defer close(r.done)
 	for range r.wake {
 		r.mu.Lock()
-		next, closed := r.next, r.closed
-		r.next = nil
+		batch, closed := r.pending, r.closed
+		r.pending = nil
 		r.mu.Unlock()
-		if next != nil && (next.State != r.last.State || next.Note != r.last.Note) && r.send != nil {
-			s := *next
+		for _, next := range batch {
+			if next == r.last || r.send == nil {
+				continue
+			}
+			s := next
 			switch s.State {
 			case core.StateWorking, core.StateBlocked, core.StateDone:
 				s.Task = r.task
 			}
 			r.send(r.ctx, s)
-			r.last = *next
+			r.last = next
 		}
 		if closed {
 			return
