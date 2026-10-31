@@ -28,6 +28,7 @@ class Sheaf < Formula
   homepage "https://github.com/sensahin/sheaf"
   version "$v"
   license "Apache-2.0"
+  head "https://github.com/sensahin/sheaf.git", branch: "main"
 
   on_macos do
     on_arm do
@@ -51,8 +52,16 @@ class Sheaf < Formula
     end
   end
 
+  head do
+    depends_on "go" => :build
+  end
+
   def install
-    bin.install "sheaf"
+    if build.head?
+      system "go", "build", *std_go_args(ldflags: "-s -w -X main.version=#{version}"), "./cmd/sheaf"
+    else
+      bin.install "sheaf"
+    end
   end
 
   service do
