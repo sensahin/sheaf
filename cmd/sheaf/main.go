@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -28,7 +29,19 @@ import (
 	"rsc.io/qr"
 )
 
-var version = "0.1.0-dev"
+// version is set by release builds with -ldflags "-X main.version=...".
+var version = ""
+
+func init() {
+	if version != "" {
+		return
+	}
+	version = "dev"
+	// `go install ...@v0.1.0` records the module version.
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		version = bi.Main.Version
+	}
+}
 
 const usage = `sheaf: many agents, one agreement.
 

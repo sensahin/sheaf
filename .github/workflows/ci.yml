@@ -20,3 +20,9 @@ jobs:
       - run: go vet ./...
       - run: go test -race ./...
       - run: go build ./cmd/sheaf
+      - name: Cross-compile every release target
+        if: runner.os == 'Linux'
+        run: |
+          for t in darwin/arm64 darwin/amd64 linux/arm64 windows/amd64 windows/arm64; do
+            CGO_ENABLED=0 GOOS=${t%/*} GOARCH=${t#*/} go build -o /dev/null ./cmd/sheaf
+          done

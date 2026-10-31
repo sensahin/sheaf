@@ -14,9 +14,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"os/signal"
 	"sync"
-	"syscall"
 
 	"github.com/creack/pty"
 	"golang.org/x/term"
@@ -56,14 +54,7 @@ func Run(ctx context.Context, o Options) (int, error) {
 
 	if o.Stdin != nil && term.IsTerminal(int(o.Stdin.Fd())) {
 		pty.InheritSize(o.Stdin, ptmx)
-		winch := make(chan os.Signal, 1)
-		signal.Notify(winch, syscall.SIGWINCH)
-		defer signal.Stop(winch)
-		go func() {
-			for range winch {
-				pty.InheritSize(o.Stdin, ptmx)
-			}
-		}()
+		defer watchResize(o.Stdin, ptmx)()
 		old, err := term.MakeRaw(int(o.Stdin.Fd()))
 		if err != nil {
 			return 0, err
