@@ -37,6 +37,17 @@ Download the archive for your system from
 `checksums.txt`, and put `sheaf` on your PATH. It is a single binary with no
 dependencies. Or, with Go installed:
 
+With Homebrew (macOS and Linux):
+
+```sh
+brew tap sensahin/sheaf https://github.com/sensahin/sheaf
+brew install sheaf
+brew services start sheaf     # runs `sheaf daemon` at login
+```
+
+Or download a binary from [Releases](https://github.com/sensahin/sheaf/releases),
+or build from source:
+
 ```sh
 go install github.com/sensahin/sheaf/cmd/sheaf@latest
 ```
