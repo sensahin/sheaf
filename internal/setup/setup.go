@@ -53,6 +53,8 @@ var plans = map[string]func(sheaf string) Plan{
 	"copilot":     copilot,
 	"cursor":      cursor,
 	"gemini":      gemini,
+	"droid":       droid,
+	"antigravity": antigravity,
 }
 
 // For returns the plan for kind, with sheaf as the path to the binary.
@@ -196,6 +198,43 @@ func gemini(sheaf string) Plan {
 			Marker: "hook gemini",
 		}},
 		Steps: []string{"Qwen Code reads the same format from .qwen/settings.json: copy the file there to use it."},
+	}
+}
+
+func droid(sheaf string) Plan {
+	h := map[string]any{"type": "command", "command": sheaf + " hook droid", "timeout": HookTimeout}
+	return Plan{
+		Kind: "droid",
+		Files: []File{{
+			// A standalone hooks.json keys events directly.
+			Path: ".factory/hooks.json",
+			Content: jsonText(map[string]any{
+				"PreToolUse": []any{map[string]any{"matcher": "*", "hooks": []any{h}}},
+			}),
+			Marker: "hook droid",
+		}},
+		Steps: []string{"droid mcp add sheaf \"" + sheaf + " mcp\"   (or add Sheaf as an MCP server with /mcp in Droid)"},
+	}
+}
+
+func antigravity(sheaf string) Plan {
+	h := map[string]any{"type": "command", "command": sheaf + " hook antigravity", "timeout": HookTimeout}
+	return Plan{
+		Kind: "antigravity",
+		Files: []File{{
+			// Antigravity's hooks.json groups hooks under a name per tool.
+			Path: ".agents/hooks.json",
+			Content: jsonText(map[string]any{"sheaf": map[string]any{
+				"PreToolUse": []any{map[string]any{"matcher": "*", "hooks": []any{h}}},
+			}}),
+			Marker: "hook antigravity",
+		}},
+		Steps: []string{
+			"Add Sheaf's MCP server to ~/.gemini/config/mcp_config.json:\n\n" +
+				jsonText(map[string]any{"mcpServers": map[string]any{"sheaf": map[string]any{
+					"command": sheaf, "args": []string{"mcp"},
+				}}}),
+		},
 	}
 }
 

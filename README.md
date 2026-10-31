@@ -66,6 +66,8 @@ sheaf setup opencode       # .opencode/plugins/sheaf.js + opencode.json
 sheaf setup copilot        # .github/hooks/sheaf.json + MCP entry to add
 sheaf setup cursor         # .cursor/hooks.json + .cursor/mcp.json
 sheaf setup gemini         # .gemini/settings.json (hook + MCP)
+sheaf setup droid          # .factory/hooks.json
+sheaf setup antigravity    # .agents/hooks.json + MCP entry to add
 ```
 
 `sheaf setup` creates missing files and never rewrites a config you already
@@ -94,6 +96,8 @@ hooks stay out of the way.
 | GitHub Copilot CLI | allow, deny, or hand back to its prompt | camelCase `preToolUse` hook |
 | Cursor (cursor-agent, IDE) | allow or deny | `preToolUse` hook; unanswered falls back to Cursor. Editor-started agents have no `SHEAF_TOKEN`, so the hook ignores them. |
 | Gemini CLI, Qwen Code | allow or deny | `BeforeTool` hook; a deny reason reaches the model as the tool's error |
+| Factory Droid | allow, deny, or hand back to its prompt | PreToolUse hook (Claude Code format, Droid's tool names) |
+| Google Antigravity | deny, or force its own prompt | PreToolUse hook; some agy versions prompt even after an approval |
 | Anything with MCP | messaging and status only | run `sheaf mcp` on stdio |
 
 The Claude Code and OpenCode adapters have been run against the real
