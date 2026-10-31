@@ -321,8 +321,16 @@ func TestEveryAdapterAnswersInItsOwnFormat(t *testing.T) {
 	if out, err := hook.Windsurf(ctx, agent, strings.NewReader(strings.ReplaceAll(ws, "CMD", "go test")), time.Second); err != nil || len(out) != 0 {
 		t.Errorf("windsurf allow: %q %v", out, err)
 	}
+	// Kiro blocks by exit status too.
+	kiro := `{"hook_event_name":"preToolUse","cwd":"/tmp","tool_name":"execute_bash","tool_input":{"command":"CMD"}}`
+	if _, err := hook.Kiro(ctx, agent, strings.NewReader(strings.ReplaceAll(kiro, "CMD", cmd)), time.Second); err == nil {
+		t.Error("kiro: force push not blocked")
+	}
+	if out, err := hook.Kiro(ctx, agent, strings.NewReader(strings.ReplaceAll(kiro, "CMD", "go test")), time.Second); err != nil || len(out) != 0 {
+		t.Errorf("kiro allow: %q %v", out, err)
+	}
 	for kind, adapter := range hook.Adapters {
-		if kind == "windsurf" {
+		if kind == "windsurf" || kind == "kiro" {
 			continue
 		}
 		tc, ok := cases[kind]

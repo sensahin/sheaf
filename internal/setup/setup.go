@@ -65,6 +65,7 @@ var plans = map[string]func(sheaf string) Plan{
 	"junie":       junie,
 	"goose":       goose,
 	"amp":         amp,
+	"kiro":        kiro,
 }
 
 // For returns the plan for kind, with sheaf as the path to the binary.
@@ -434,6 +435,42 @@ export default function (amp) {
   })
 }
 `
+}
+
+func kiro(sheaf string) Plan {
+	hook := func(name, trigger, matcher, command string, timeout int) map[string]any {
+		h := map[string]any{
+			"name": name, "trigger": trigger, "enabled": true, "timeout": timeout,
+			"action": map[string]any{"type": "command", "command": command},
+		}
+		if matcher != "" {
+			h["matcher"] = matcher
+		}
+		return h
+	}
+	return Plan{
+		Kind: "kiro",
+		Files: []File{
+			{
+				Path: ".kiro/hooks/sheaf.json",
+				Content: jsonText(map[string]any{"version": "v1", "hooks": []any{
+					hook("sheaf-policy", "PreToolUse", "*", sheaf+" hook kiro", HookTimeout),
+					hook("sheaf-working", "UserPromptSubmit", "", sheaf+" hook status working", StatusTimeout),
+					hook("sheaf-idle", "Stop", "", sheaf+" hook status idle", StatusTimeout),
+				}}),
+				Marker: "hook kiro",
+				Owned:  true,
+			},
+			{
+				Path: ".kiro/settings/mcp.json",
+				Content: jsonText(map[string]any{"mcpServers": map[string]any{"sheaf": map[string]any{
+					"command": sheaf, "args": []string{"mcp"},
+				}}}),
+				Marker: `"sheaf"`,
+			},
+		},
+		Steps: []string{"Kiro blocks a tool by the hook's exit status: a call Sheaf denies is stopped, anything else goes to Kiro's own approval. Kiro's hook format is new; if `kiro-cli` rejects the file, tell us your version."},
+	}
 }
 
 func shellQuote(s string) string {

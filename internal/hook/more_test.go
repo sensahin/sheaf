@@ -69,6 +69,11 @@ func TestMoreAgentsMapping(t *testing.T) {
 	c, ok = ampCall(ampInput{Tool: "read_web_page", Input: []byte(`{"url":"https://docs.example/x"}`)})
 	check("amp web", c, ok, core.ActionNetwork, "docs.example")
 
+	c, ok = kiroCall(kiroInput{ToolTags: &kiroCallFields{ToolName: "fs_write", ToolInput: []byte(`{"path":"/k/a.rs"}`)}})
+	check("kiro v2 tool_tags", c, ok, core.ActionWrite, "/k/a.rs")
+	c, ok = kiroCall(kiroInput{kiroCallFields: kiroCallFields{ToolName: "fs_read"}})
+	check("kiro read", c, ok, "")
+
 	c, ok = droidCall(PreToolUseInput{ToolName: "Execute", ToolInput: []byte(`{"command":"make"}`)})
 	check("droid execute", c, ok, core.ActionShell, "make")
 	c, ok = droidCall(PreToolUseInput{ToolName: "Create", ToolInput: []byte(`{"file_path":"/p/n.go","content":"x"}`)})
