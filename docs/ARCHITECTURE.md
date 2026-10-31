@@ -109,13 +109,13 @@ many tasks can be resumed when it starts.
 
 ## Next
 
-1. Native desktop app for the queue and diffs; an optional end-to-end
+1. The remaining adapters, before the desktop app: Windsurf (now Devin
+   Local), Cline, Kiro, and Goose and Amp plugins; Junie through MCP only;
+   Aider through `sheaf run` only. Agent hook events (stop, notification)
+   feed status, not just approvals. Terminal adapters: herdr, Rex and cmux
+   panes. A Homebrew tap.
+2. Native desktop app for the queue and diffs; an optional end-to-end
    encrypted relay so the web queue works away from home without a VPN.
-2. Adapters for every popular agent, before the desktop app (research in
-   order of adoption and hook support):
-   Windsurf (now Devin Local), Cline, Kiro, Goose and Amp plugins; Junie through MCP only, Aider through `sheaf run` only.
-   Agent hook events (stop, notification) feed status, not just approvals.
-   Terminal adapters: herdr, Rex and cmux panes. A Homebrew tap.
 3. Signed macOS app identity for the daemon, so TCC and Local Network
    consent stick.
 4. Optional container isolation per task; network and secret brokering.
