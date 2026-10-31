@@ -47,8 +47,8 @@ queue. Adapters for other agents' hook systems follow the same shape: each
 targets; a patch has one target per file), `hook.Decide` applies the policy
 and the queue, and the adapter writes the answer in the agent's format.
 `sheaf setup KIND` writes the agent's hook and MCP config. Claude Code, Codex,
-OpenCode, Copilot CLI, Cursor, Gemini CLI, Factory Droid, Antigravity, Cline
-and Windsurf work this way today; Windsurf blocks by exit status, which an
+OpenCode, Copilot CLI, Cursor, Gemini CLI, Factory Droid, Antigravity, Cline,
+Windsurf, goose and Amp work this way today; Windsurf blocks by exit status, which an
 adapter signals by returning `*hook.Blocked`. Junie gets MCP only.
 
 **Worktrees before containers.** A worktree per task stops agents from
@@ -111,7 +111,7 @@ many tasks can be resumed when it starts.
 ## Next
 
 1. The remaining adapters, before the desktop app: Kiro hooks (format to
-   confirm on a real install), Goose and Amp plugins. Agent hook events (stop, notification)
+   confirm on a real install). Agent hook events (stop, notification)
    feed status, not just approvals. (Terminal adapters are done: tmux
    windows, herdr and cmux status, Rex panes; so is the Homebrew formula.)
 2. Native desktop app for the queue and diffs; an optional end-to-end

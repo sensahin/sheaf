@@ -55,6 +55,20 @@ func TestMoreAgentsMapping(t *testing.T) {
 	c, ok = geminiCall(PreToolUseInput{ToolName: "read_file"})
 	check("gemini read", c, ok, "")
 
+	c, ok = gooseCall(gooseInput{ToolName: "developer__text_editor", ToolInput: []byte(`{"command":"view","path":"x"}`)})
+	check("goose view", c, ok, "")
+	c, ok = gooseCall(gooseInput{ToolName: "developer__edit", ToolInput: []byte(`{"path":"/p/a","before":"x","after":"y"}`), WorkingDir: "/p"})
+	check("goose edit", c, ok, core.ActionWrite, "/p/a")
+	c, ok = gooseCall(gooseInput{ToolName: "sheaf__send"})
+	check("goose sheaf tool", c, ok, "")
+	c, ok = ampCall(ampInput{Tool: "Bash", Input: []byte(`{"cmd":"make","cwd":"/r"}`)})
+	check("amp bash", c, ok, core.ActionShell, "make")
+	if c.Cwd != "/r" {
+		t.Errorf("amp cwd from input: %q", c.Cwd)
+	}
+	c, ok = ampCall(ampInput{Tool: "read_web_page", Input: []byte(`{"url":"https://docs.example/x"}`)})
+	check("amp web", c, ok, core.ActionNetwork, "docs.example")
+
 	c, ok = droidCall(PreToolUseInput{ToolName: "Execute", ToolInput: []byte(`{"command":"make"}`)})
 	check("droid execute", c, ok, core.ActionShell, "make")
 	c, ok = droidCall(PreToolUseInput{ToolName: "Create", ToolInput: []byte(`{"file_path":"/p/n.go","content":"x"}`)})

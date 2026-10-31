@@ -63,6 +63,8 @@ var plans = map[string]func(sheaf string) Plan{
 	"cline":       cline,
 	"windsurf":    windsurf,
 	"junie":       junie,
+	"goose":       goose,
+	"amp":         amp,
 }
 
 // For returns the plan for kind, with sheaf as the path to the binary.
@@ -305,6 +307,86 @@ func junie(sheaf string) Plan {
 		}},
 		Steps: []string{"Junie has no pre-tool hooks yet, so Sheaf gives it messaging, tasks and status, but cannot hold its tool calls for approval."},
 	}
+}
+
+func goose(sheaf string) Plan {
+	return Plan{
+		Kind: "goose",
+		Files: []File{
+			{
+				Path:    ".agents/plugins/sheaf/plugin.json",
+				Content: jsonText(map[string]any{"name": "sheaf", "description": "Routes goose's tool calls through your Sheaf policy and queue."}),
+				Marker:  `"sheaf"`,
+				Owned:   true,
+			},
+			{
+				Path: ".agents/plugins/sheaf/hooks/hooks.json",
+				Content: jsonText(map[string]any{"hooks": map[string]any{
+					"PreToolUse": []any{map[string]any{"hooks": []any{map[string]any{
+						"type": "command", "command": sheaf + " hook goose", "timeout": HookTimeout,
+					}}}},
+				}}),
+				Marker: "hook goose",
+				Owned:  true,
+			},
+		},
+		Steps: []string{"Add Sheaf as a goose extension in ~/.config/goose/config.yaml:\n\n" +
+			"extensions:\n" +
+			"  sheaf:\n" +
+			"    name: sheaf\n" +
+			"    type: stdio\n" +
+			"    cmd: " + tomlString(sheaf) + "\n" +
+			"    args: [mcp]\n" +
+			"    enabled: true\n" +
+			"    timeout: 660"},
+	}
+}
+
+func amp(sheaf string) Plan {
+	return Plan{
+		Kind:  "amp",
+		Files: []File{{Path: ".amp/plugins/sheaf.ts", Content: ampPlugin(sheaf), Marker: "hook amp", Owned: true}},
+		Steps: []string{"Add Sheaf's MCP server to Amp's settings.json:\n\n" +
+			jsonText(map[string]any{"amp.mcpServers": map[string]any{"sheaf": map[string]any{
+				"command": sheaf, "args": []string{"mcp"},
+			}}})},
+	}
+}
+
+func ampPlugin(sheaf string) string {
+	return `// Sheaf for Amp: checks each tool call against your Sheaf policy and sends
+// the ones that need you to your Sheaf queue by running ` + "`sheaf hook amp`" + `.
+// Written by ` + "`sheaf setup amp`" + `.
+const SHEAF = ` + string(must(json.Marshal(sheaf))) + `
+
+export default function (amp) {
+  amp.on("tool.call", async (event, ctx) => {
+    // Outside Sheaf (no SHEAF_TOKEN) stay out of the way.
+    if (!process.env.SHEAF_TOKEN) return { action: "allow" }
+    const payload = JSON.stringify({ tool: event.tool, input: event.input, cwd: process.cwd() })
+    let verdict = {}
+    try {
+      const proc = Bun.spawn([SHEAF, "hook", "amp"], { stdin: new Blob([payload]), stdout: "pipe", stderr: "ignore" })
+      const out = await new Response(proc.stdout).text()
+      if ((await proc.exited) === 0) verdict = JSON.parse(out)
+    } catch {
+      // Sheaf unreachable: fall through to allow, as without Sheaf.
+    }
+    if (verdict.decision === "deny") {
+      return { action: "reject-and-continue", message: verdict.reason || "Sheaf denied this call" }
+    }
+    if (verdict.decision === "ask") {
+      const ok = await ctx.ui.confirm({
+        title: "Sheaf: allow " + event.tool + "?",
+        message: verdict.reason || "Nobody answered in Sheaf yet.",
+        confirmButtonText: "Allow",
+      })
+      if (!ok) return { action: "reject-and-continue", message: "You declined this in Amp." }
+    }
+    return { action: "allow" }
+  })
+}
+`
 }
 
 func shellQuote(s string) string {
