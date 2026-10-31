@@ -22,6 +22,7 @@ import (
 	"github.com/sensahin/sheaf/internal/api"
 	"github.com/sensahin/sheaf/internal/config"
 	"github.com/sensahin/sheaf/internal/core"
+	"github.com/sensahin/sheaf/internal/herdr"
 	"github.com/sensahin/sheaf/internal/hook"
 	"github.com/sensahin/sheaf/internal/launch"
 	"github.com/sensahin/sheaf/internal/mcpserver"
@@ -357,6 +358,22 @@ func cmdRun(ctx context.Context, paths config.Paths, c *api.Client, args []strin
 	if who.IsHuman() {
 		return fmt.Errorf("sheaf run reports status for an agent: set SHEAF_TOKEN to the agent's token")
 	}
+	report := func(ctx context.Context, r core.StatusReport) error {
+		return c.Call(ctx, "agent.report_status", r, nil)
+	}
+	// Inside herdr, mirror the status into herdr's sidebar too, and give
+	// herdr the command that brings this agent back after a restart.
+	pane, inHerdr := herdr.Detect()
+	if inHerdr {
+		resume := herdrResume(ctx, c, who.Name, *task)
+		toDaemon := report
+		report = func(ctx context.Context, r core.StatusReport) error {
+			err := toDaemon(ctx, r)
+			pane.Report(ctx, who.Name, r, resume)
+			resume = nil // once is enough
+			return err
+		}
+	}
 	// Signals go to the agent through its terminal; Sheaf just outlives it.
 	signal.Ignore(os.Interrupt, syscall.SIGTERM)
 	code, err := agentrun.Run(context.Background(), agentrun.Options{
@@ -365,14 +382,35 @@ func cmdRun(ctx context.Context, paths config.Paths, c *api.Client, args []strin
 		Task:    *task,
 		Stdin:   os.Stdin,
 		Stdout:  os.Stdout,
-		Report: func(ctx context.Context, r core.StatusReport) error {
-			return c.Call(ctx, "agent.report_status", r, nil)
-		},
+		Report:  report,
 	})
+	if inHerdr {
+		pane.Release(context.Background(), who.Name)
+	}
 	if err != nil {
 		return err
 	}
 	os.Exit(code)
+	return nil
+}
+
+// herdrResume is the command herdr runs to bring agent back in its pane:
+// the agent's resume command, under `sheaf run` so Sheaf keeps tracking it.
+// It is nil when the agent has no resume command.
+func herdrResume(ctx context.Context, c *api.Client, agent, task string) []string {
+	var agents []core.Agent
+	if err := c.Call(ctx, "agent.list", nil, &agents); err != nil {
+		return nil
+	}
+	for _, a := range agents {
+		if a.Name == agent && a.ResumeCmd != "" {
+			argv := []string{self(), "run", "--agent", agent}
+			if task != "" {
+				argv = append(argv, "--task", task)
+			}
+			return append(argv, "--", "sh", "-c", a.ResumeCmd)
+		}
+	}
 	return nil
 }
 
@@ -929,7 +967,11 @@ func cmdStart(ctx context.Context, paths config.Paths, c *api.Client, args []str
 	}
 
 	spec := launch.Spec{Agent: name, Task: *task, Dir: dir, Command: command, Sheaf: self()}
-	if *here || exec.Command("tmux", "-V").Run() != nil {
+	// In a herdr pane (and not in tmux inside it), the pane is the window:
+	// run here, and `sheaf run` reports the status to herdr as well.
+	_, inHerdr := herdr.Detect()
+	inHerdr = inHerdr && os.Getenv("TMUX") == ""
+	if *here || inHerdr || exec.Command("tmux", "-V").Run() != nil {
 		if err := os.Chdir(dir); err != nil {
 			return err
 		}

@@ -156,6 +156,15 @@ set -g status-interval 5
 It shows something like `sheaf: 2 need you · 1 blocked · 3 working`, and
 nothing when all is quiet.
 
+## herdr
+
+Inside a [herdr](https://herdr.dev) pane, `sheaf start AGENT` runs the agent
+right in that pane, and `sheaf run` mirrors its status into herdr's sidebar
+(working, blocked with the reason, idle). It also hands herdr the agent's
+resume command, wrapped in `sheaf run`, so when herdr brings the pane back
+after a restart, Sheaf keeps tracking the agent. Sheaf's queue, worktrees and
+messaging work the same as anywhere else.
+
 ## Status without tool calls
 
 Claude Code, Codex, Amp, goose, opencode and others already print their
