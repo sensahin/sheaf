@@ -58,7 +58,7 @@ class Sheaf < Formula
 
   def install
     if build.head?
-      system "go", "build", *std_go_args(ldflags: "-s -w -X main.version=#{version}"), "./cmd/sheaf"
+      system "go", "build", "-trimpath", "-o", bin/"sheaf", "-ldflags", "-s -w -X main.version=#{version}", "./cmd/sheaf"
     else
       bin.install "sheaf"
     end
