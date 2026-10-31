@@ -48,18 +48,81 @@ func TestApplyNeverRewritesAgentConfig(t *testing.T) {
 		t.Fatalf("second apply: %+v", res)
 	}
 
-	// The user's own opencode.json without Sheaf in it is left untouched;
-	// Sheaf's plugin file is rewritten.
+	// The user's own opencode.json gains Sheaf's entry and keeps theirs,
+	// with a backup; Sheaf's plugin file is rewritten.
 	cfg := filepath.Join(dir, "opencode.json")
 	mine := `{"model": "anthropic/claude"}`
 	os.WriteFile(cfg, []byte(mine), 0o644)
 	os.WriteFile(filepath.Join(dir, ".opencode/plugins/sheaf.js"), []byte("old"), 0o644)
 	res, _ = Apply(dir, p)
-	if res[0].Status != "updated" || res[1].Status != "skipped" || res[1].Content == "" {
+	if res[0].Status != "updated" || res[1].Status != "merged" {
 		t.Fatalf("third apply: %+v", res)
 	}
-	if b, _ := os.ReadFile(cfg); string(b) != mine {
-		t.Fatalf("opencode.json rewritten: %s", b)
+	if b, _ := os.ReadFile(cfg + ".sheaf-backup"); string(b) != mine {
+		t.Fatalf("backup: %s", b)
+	}
+	b, _ := os.ReadFile(cfg)
+	if !strings.Contains(string(b), `"model": "anthropic/claude"`) || !strings.Contains(string(b), `"sheaf"`) {
+		t.Fatalf("merged opencode.json: %s", b)
+	}
+	if res, _ = Apply(dir, p); res[1].Status != "ok" {
+		t.Fatalf("after merge: %+v", res)
+	}
+
+	// A config Sheaf cannot parse (comments) is left untouched.
+	jsonc := "// mine\n{\"model\": \"x\"}"
+	os.WriteFile(cfg, []byte(jsonc), 0o644)
+	res, _ = Apply(dir, p)
+	if res[1].Status != "skipped" || res[1].Content == "" {
+		t.Fatalf("jsonc: %+v", res)
+	}
+	if b, _ := os.ReadFile(cfg); string(b) != jsonc {
+		t.Fatalf("jsonc rewritten: %s", b)
+	}
+}
+
+func TestMergeKeepsTheUsersClaudeSettings(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".claude/settings.json")
+	os.MkdirAll(filepath.Dir(path), 0o755)
+	mine := `{
+  "model": "opus",
+  "permissions": {"allow": ["Bash(npm test)"]},
+  "hooks": {
+    "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "my-linter", "timeout": 30}]}]
+  }
+}`
+	os.WriteFile(path, []byte(mine), 0o600)
+	p, _ := For("claude-code", "/bin/sheaf")
+	res, err := Apply(dir, p)
+	if err != nil || res[0].Status != "merged" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	var got struct {
+		Model       string
+		Permissions struct{ Allow []string }
+		Hooks       map[string][]struct {
+			Matcher string
+			Hooks   []struct{ Command string }
+		}
+	}
+	b, _ := os.ReadFile(path)
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	pre := got.Hooks["PreToolUse"]
+	if got.Model != "opus" || len(got.Permissions.Allow) != 1 || len(pre) != 2 ||
+		pre[0].Hooks[0].Command != "my-linter" || pre[1].Hooks[0].Command != "/bin/sheaf hook claude-code" {
+		t.Fatalf("merged settings: %s", b)
+	}
+	if len(got.Hooks["Stop"]) != 1 {
+		t.Fatalf("status hooks missing: %s", b)
+	}
+	if st, _ := os.Stat(path); st.Mode().Perm() != 0o600 {
+		t.Fatalf("mode changed to %v", st.Mode())
+	}
+	if again, _ := Apply(dir, p); again[0].Status != "ok" {
+		t.Fatalf("second apply: %+v", again)
 	}
 }
 

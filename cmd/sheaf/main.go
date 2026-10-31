@@ -687,7 +687,11 @@ func cmdSetup(args []string) error {
 		for _, f := range plan.Files {
 			fmt.Printf("# %s\n%s\n", f.Path, f.Content)
 		}
+		for _, c := range plan.Commands {
+			fmt.Printf("\n%s\n", indent(strings.Join(c.Args, " ")))
+		}
 	} else {
+		warnSetupDir(*dir)
 		results, err := setup.Apply(*dir, plan)
 		if err != nil {
 			return err
@@ -698,15 +702,65 @@ func cmdSetup(args []string) error {
 				fmt.Printf("%s already exists, so Sheaf left it alone. Add this to it:\n\n%s\n", r.Path, indent(r.Content))
 			case "ok":
 				fmt.Printf("%s is already set up.\n", r.Path)
+			case "merged":
+				fmt.Printf("Added Sheaf to %s, keeping your settings (the original is in %s.sheaf-backup).\n", r.Path, r.Path)
 			default:
 				fmt.Printf("%s %s.\n", r.Status, r.Path)
 			}
+		}
+	}
+	for _, c := range plan.Commands {
+		if !*printOnly {
+			runSetupCommand(c)
 		}
 	}
 	for _, s := range plan.Steps {
 		fmt.Printf("\n%s\n", indent(s))
 	}
 	return nil
+}
+
+// runSetupCommand runs a setup command when its program is installed and its
+// work is not done yet, and otherwise says what to run.
+func runSetupCommand(c setup.Command) {
+	line := strings.Join(c.Args, " ")
+	if _, err := exec.LookPath(c.Args[0]); err != nil {
+		fmt.Printf("\n%s is not on your PATH. Once it is, run:\n\n%s", c.Args[0], indent(line))
+		return
+	}
+	if len(c.Check) > 0 {
+		check := exec.Command(c.Check[0], c.Check[1:]...)
+		if check.Run() == nil {
+			fmt.Printf("%s already knows Sheaf's MCP server.\n", c.Args[0])
+			return
+		}
+	}
+	cmd := exec.Command(c.Args[0], c.Args[1:]...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		fmt.Printf("\nRunning this failed (%v):\n\n%s%s", err, indent(line), indent(string(out)))
+		return
+	}
+	fmt.Printf("Ran: %s\n", line)
+}
+
+// warnSetupDir explains where the config lands when dir is not a project.
+func warnSetupDir(dir string) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return
+	}
+	if home, err := os.UserHomeDir(); err == nil && abs == home {
+		fmt.Println("This is your home directory. Agents that read user settings from here (such as")
+		fmt.Println("~/.claude/settings.json) will use Sheaf in every project. That is fine: the hooks do")
+		fmt.Println("nothing for sessions Sheaf did not start. For one project only, run `sheaf setup` there.")
+		fmt.Println()
+		return
+	}
+	if err := exec.Command("git", "-C", abs, "rev-parse", "--git-dir").Run(); err != nil {
+		fmt.Printf("Note: %s is not in a git repository. Sheaf's config is per project, and tasks\n", abs)
+		fmt.Println("get worktrees only in git repositories, so you usually run `sheaf setup` in your project.")
+		fmt.Println()
+	}
 }
 
 func indent(s string) string {

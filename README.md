@@ -98,9 +98,11 @@ sheaf setup kiro           # .kiro/hooks/sheaf.json + .kiro/settings/mcp.json
 sheaf setup junie          # .junie/mcp/mcp.json (MCP only)
 ```
 
-`sheaf setup` creates missing files and never rewrites a config you already
-have; it prints what to add instead. `--print` shows everything without
-writing.
+`sheaf setup` creates missing files. When you already have a JSON config (say
+your own `.claude/settings.json`), it adds Sheaf's entries next to yours,
+keeps every setting you made, and saves the original as
+`settings.json.sheaf-backup`. For Claude Code it also runs `claude mcp add`
+for you. `--print` shows everything without writing.
 
 Then start agents through Sheaf:
 

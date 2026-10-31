@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 )
@@ -39,6 +40,16 @@ type Plan struct {
 	Files   []File
 	// Steps are commands or notes for what Sheaf does not write itself.
 	Steps []string
+	// Commands are run by `sheaf setup` when their program is installed,
+	// and printed for you to run otherwise.
+	Commands []Command
+}
+
+// Command is one command `sheaf setup` can run for you.
+type Command struct {
+	Args []string
+	// Check succeeds when the command's work is already done.
+	Check []string
 }
 
 // Kinds lists the agent programs Sheaf can set up.
@@ -131,7 +142,10 @@ func claudeCode(sheaf string) Plan {
 	return Plan{
 		Kind:  "claude-code",
 		Files: []File{{Path: ".claude/settings.json", Content: preToolUse(cmd, nil, claudeStatus, sheaf), Marker: "hook claude-code"}},
-		Steps: []string{"claude mcp add --scope user sheaf -- " + sheaf + " mcp"},
+		Commands: []Command{{
+			Args:  []string{"claude", "mcp", "add", "--scope", "user", "sheaf", "--", sheaf, "mcp"},
+			Check: []string{"claude", "mcp", "get", "sheaf"},
+		}},
 	}
 }
 
@@ -523,9 +537,11 @@ type Result struct {
 	Content string
 }
 
-// Apply writes plan's files under dir. It creates missing files, rewrites
-// Sheaf's own, and leaves an existing agent config alone: one that already
-// mentions Sheaf is "ok", any other is "skipped" with what to add.
+// Apply writes plan's files under dir. It creates missing files and rewrites
+// Sheaf's own. An existing agent config that already mentions Sheaf is "ok".
+// Any other JSON config is "merged": Sheaf adds its entries next to yours,
+// keeps every value you set, and saves the original as PATH.sheaf-backup
+// first. A config Sheaf cannot merge is "skipped", with what to add by hand.
 func Apply(dir string, plan Plan) ([]Result, error) {
 	var out []Result
 	for _, f := range plan.Files {
@@ -548,11 +564,92 @@ func Apply(dir string, plan Plan) ([]Result, error) {
 			out = append(out, Result{Path: f.Path, Status: "updated"})
 		case strings.Contains(string(old), f.Marker):
 			out = append(out, Result{Path: f.Path, Status: "ok"})
+		case strings.HasSuffix(f.Path, ".json"):
+			merged, ok := mergeJSON(old, f.Content)
+			if !ok {
+				out = append(out, Result{Path: f.Path, Status: "skipped", Content: f.Content})
+				continue
+			}
+			st, err := os.Stat(p)
+			if err != nil {
+				return out, err
+			}
+			if err := write(p+".sheaf-backup", string(old), st.Mode().Perm()); err != nil {
+				return out, err
+			}
+			if err := write(p, merged, st.Mode().Perm()); err != nil {
+				return out, err
+			}
+			out = append(out, Result{Path: f.Path, Status: "merged"})
 		default:
 			out = append(out, Result{Path: f.Path, Status: "skipped", Content: f.Content})
 		}
 	}
 	return out, nil
+}
+
+// mergeJSON adds Sheaf's config to an existing JSON object: objects merge
+// key by key, Sheaf's array entries are appended unless an equal entry is
+// there, and wherever both set a plain value, yours wins. It fails, leaving
+// the file to you, if either side is not a JSON object (such as a file with
+// comments).
+func mergeJSON(old []byte, add string) (string, bool) {
+	var dst, src map[string]any
+	if decodeObject(old, &dst) != nil || dst == nil || decodeObject([]byte(add), &src) != nil {
+		return "", false
+	}
+	b, err := json.MarshalIndent(mergeValue(dst, src), "", "  ")
+	if err != nil {
+		return "", false
+	}
+	return string(b) + "\n", true
+}
+
+// decodeObject keeps numbers as written, so merging never rounds them.
+func decodeObject(b []byte, v *map[string]any) error {
+	d := json.NewDecoder(bytes.NewReader(b))
+	d.UseNumber()
+	if err := d.Decode(v); err != nil {
+		return err
+	}
+	if d.More() {
+		return errors.New("trailing data")
+	}
+	return nil
+}
+
+func mergeValue(dst, src any) any {
+	switch s := src.(type) {
+	case map[string]any:
+		d, ok := dst.(map[string]any)
+		if !ok {
+			return dst
+		}
+		for k, v := range s {
+			if old, ok := d[k]; ok {
+				d[k] = mergeValue(old, v)
+			} else {
+				d[k] = v
+			}
+		}
+		return d
+	case []any:
+		d, ok := dst.([]any)
+		if !ok {
+			return dst
+		}
+	next:
+		for _, v := range s {
+			for _, have := range d {
+				if reflect.DeepEqual(have, v) {
+					continue next
+				}
+			}
+			d = append(d, v)
+		}
+		return d
+	}
+	return dst
 }
 
 func write(path, content string, mode os.FileMode) error {
