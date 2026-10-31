@@ -25,8 +25,9 @@ gives your agents what a terminal multiplexer can't:
 Sheaf is open source (Apache-2.0) and needs no account. Your agents and their
 messages never leave your machine.
 
-> Status: early. The core runtime works and is tested; the desktop app,
-> the phone view and adapters for other terminals are next. See
+> Status: early. The core runtime and the web queue work and are tested;
+> the desktop app, a relay for reaching your queue from anywhere and adapters
+> for other terminals are next. See
 > [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Quick start
@@ -91,6 +92,26 @@ When the work is ready, the builder asks for review with
 `request_approval(kind="diff", task=...)`, and `sheaf show` prints the diff
 from the task's worktree.
 
+## Your queue on your phone
+
+The daemon also serves the queue as a small web page, on `127.0.0.1:7517` by
+default. To use it from your phone, pair the phone:
+
+```sh
+sheaf daemon --web 0.0.0.0:7517     # or your Tailscale address
+sheaf pair --name phone             # prints a QR code and a link
+```
+
+Scan the code and you get the queue, with diffs, approve, deny and answer
+buttons, your agents' status and their messages to you. It updates live and
+can be added to the home screen. Each paired device has its own token, so
+`sheaf device revoke ID` cuts off a lost phone without touching anything
+else. A paired device can decide approvals and message agents, but cannot add
+agents, change policies or pair more devices.
+
+The page is plain HTTP. Use it on a private network such as Tailscale, not on
+public Wi-Fi.
+
 ## Tools agents get
 
 | Tool | What it does |
@@ -106,11 +127,12 @@ from the task's worktree.
 ## Commands
 
 ```
-sheaf init | daemon | status
+sheaf init | daemon [--web ADDR|off] | status
 sheaf agent add|ls|rm|token|policy
 sheaf task new|ls|show|status|done|handoff
 sheaf send | inbox
 sheaf queue | show | approve | deny | answer
+sheaf pair | device ls|revoke
 sheaf resume [--tmux] | log [--follow]
 sheaf mcp | hook claude-code
 ```

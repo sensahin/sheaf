@@ -386,3 +386,51 @@ func TestStateSurvivesRestart(t *testing.T) {
 		t.Fatalf("event log has %d events", len(evs))
 	}
 }
+
+func TestDevices(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newService(t)
+	b, _ := addAgent(t, s, "builder")
+
+	if _, _, err := s.PairDevice(ctx, b, "phone"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("agent paired a device: %v", err)
+	}
+	d, tok, err := s.PairDevice(ctx, HumanCaller, "phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.Authenticate(ctx, tok)
+	if err != nil || !c.IsHuman() || c.Device != d.ID {
+		t.Fatalf("device auth: %+v %v", c, err)
+	}
+
+	// A device acts as the human for the queue...
+	ap, _ := s.RequestApproval(ctx, b, ApprovalRequest{Summary: "push"})
+	if _, err := s.Decide(ctx, c, DecideRequest{ID: ap.ID, Status: ApprovalApproved}); err != nil {
+		t.Fatalf("device decide: %v", err)
+	}
+	// ...but cannot mint tokens, loosen policies or pair more devices.
+	if _, _, err := s.AddAgent(ctx, c, AgentSpec{Name: "rogue"}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("device added agent: %v", err)
+	}
+	if _, err := s.RotateToken(ctx, c, "builder"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("device rotated token: %v", err)
+	}
+	if err := s.SetPolicy(ctx, c, "builder", Policy{Default: Allow}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("device set policy: %v", err)
+	}
+	if _, _, err := s.PairDevice(ctx, c, "tablet"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("device paired a device: %v", err)
+	}
+
+	if err := s.RevokeDevice(ctx, HumanCaller, d.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Authenticate(ctx, tok); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("revoked token still works: %v", err)
+	}
+	ds, _ := s.ListDevices(ctx, HumanCaller)
+	if len(ds) != 1 || ds[0].RevokedAt == nil || ds[0].LastSeen == nil {
+		t.Fatalf("devices: %+v", ds)
+	}
+}

@@ -23,6 +23,10 @@ import (
 type Server struct {
 	svc *core.Service
 	mux *http.ServeMux
+
+	// WebURL is where the web queue is served, if it is. Pairing links point
+	// here.
+	WebURL string
 }
 
 type handler func(ctx context.Context, c core.Caller, body json.RawMessage) (any, error)
@@ -33,6 +37,7 @@ func NewServer(svc *core.Service) *Server {
 	for name, h := range s.methods() {
 		s.mux.Handle("POST /v1/"+name, s.wrap(h))
 	}
+	s.mountWeb()
 	return s
 }
 
@@ -56,13 +61,23 @@ func (s *Server) ListenUnix(ctx context.Context, path string) error {
 		return err
 	}
 	srv := &http.Server{Handler: s.mux, ReadHeaderTimeout: 10 * time.Second}
+	return serve(ctx, srv, l)
+}
+
+// ListenTCP serves the API and the web queue on l until ctx ends.
+func (s *Server) ListenTCP(ctx context.Context, l net.Listener) error {
+	srv := &http.Server{Handler: s.mux, ReadHeaderTimeout: 10 * time.Second}
+	return serve(ctx, srv, l)
+}
+
+func serve(ctx context.Context, srv *http.Server, l net.Listener) error {
 	go func() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		srv.Shutdown(sctx)
 	}()
-	err = srv.Serve(l)
+	err := srv.Serve(l)
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
@@ -161,6 +176,15 @@ type (
 		After       int64 `json:"after"`
 		Limit       int   `json:"limit,omitempty"`
 		WaitSeconds int   `json:"wait_seconds,omitempty"`
+	}
+	PairReq struct {
+		Name string `json:"name,omitempty"`
+	}
+	PairResp struct {
+		Device core.Device `json:"device"`
+		Token  string      `json:"token"`
+		// URL opens the web queue already paired, when the daemon serves it.
+		URL string `json:"url,omitempty"`
 	}
 	AddAgentResp struct {
 		Agent core.Agent `json:"agent"`
@@ -265,6 +289,33 @@ func (s *Server) methods() map[string]handler {
 			return svc.Check(ctx, c, r)
 		}),
 
+		"device.pair": typed(func(ctx context.Context, c core.Caller, r PairReq) (any, error) {
+			d, tok, err := svc.PairDevice(ctx, c, r.Name)
+			if err != nil {
+				return nil, err
+			}
+			resp := PairResp{Device: d, Token: tok}
+			if s.WebURL != "" {
+				// The token rides in the fragment, which browsers never send to
+				// the server or put in logs.
+				resp.URL = s.WebURL + "/#t=" + tok
+			}
+			return resp, nil
+		}),
+		"device.list": func(ctx context.Context, c core.Caller, _ json.RawMessage) (any, error) {
+			return svc.ListDevices(ctx, c)
+		},
+		"device.revoke": typed(func(ctx context.Context, c core.Caller, r IDReq) (any, error) {
+			return OK{true}, svc.RevokeDevice(ctx, c, r.ID)
+		}),
+
+		"events.head": func(ctx context.Context, c core.Caller, _ json.RawMessage) (any, error) {
+			if !c.IsHuman() {
+				return nil, core.ErrForbidden
+			}
+			id, err := svc.LastEventID(ctx)
+			return map[string]int64{"id": id}, err
+		},
 		"events.list": typed(func(ctx context.Context, c core.Caller, r EventsReq) (any, error) {
 			if !c.IsHuman() {
 				return nil, core.ErrForbidden

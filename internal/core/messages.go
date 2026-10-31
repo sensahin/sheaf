@@ -70,7 +70,7 @@ func (s *Service) Send(ctx context.Context, c Caller, r SendRequest) (Message, e
 
 // InboxRequest reads the caller's inbox.
 type InboxRequest struct {
-	// All includes messages already read.
+	// All includes messages already read (the newest 200).
 	All bool `json:"all,omitempty"`
 	// Peek leaves unread messages unread.
 	Peek bool `json:"peek,omitempty"`
@@ -85,8 +85,9 @@ func (s *Service) Inbox(ctx context.Context, c Caller, r InboxRequest) ([]Messag
 	if !r.All {
 		q += ` AND read_at IS NULL`
 	}
-	q += ` ORDER BY created_at, id LIMIT 200`
-	var out []Message
+	// The newest 200, returned oldest first.
+	q = `SELECT * FROM (` + q + ` ORDER BY created_at DESC, id DESC LIMIT 200) ORDER BY created_at, id`
+	out := []Message{}
 	err := s.waitFor(ctx, time.Duration(r.WaitSeconds)*time.Second, func() (bool, error) {
 		rows, err := s.db.QueryContext(ctx, q, c.Name)
 		if err != nil {

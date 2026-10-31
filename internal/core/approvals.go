@@ -157,7 +157,7 @@ func (s *Service) ListApprovals(ctx context.Context, status string) ([]Approval,
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Approval
+	out := []Approval{}
 	for rows.Next() {
 		a, err := scanApproval(rows)
 		if err != nil {

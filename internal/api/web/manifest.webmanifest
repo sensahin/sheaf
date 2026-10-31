@@ -1,0 +1,10 @@
+{
+  "name": "Sheaf",
+  "short_name": "Sheaf",
+  "description": "What your agents need from you.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#F6F7F4",
+  "theme_color": "#15201B",
+  "icons": [{"src": "icon.svg", "sizes": "any", "type": "image/svg+xml"}]
+}

@@ -98,6 +98,16 @@ CREATE TABLE approvals (
 );
 CREATE INDEX approvals_status ON approvals(status);
 `,
+	`
+CREATE TABLE devices (
+	id         TEXT PRIMARY KEY,
+	name       TEXT NOT NULL,
+	token_hash TEXT NOT NULL UNIQUE,
+	created_at TEXT NOT NULL,
+	last_seen  TEXT,
+	revoked_at TEXT
+);
+`,
 }
 
 func migrate(db *sql.DB) error {

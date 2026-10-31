@@ -135,7 +135,7 @@ func (s *Service) ListTasks(ctx context.Context, f TaskFilter) ([]Task, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Task
+	out := []Task{}
 	for rows.Next() {
 		t, err := scanTask(rows)
 		if err != nil {
@@ -247,7 +247,7 @@ func (s *Service) ResumePlan(ctx context.Context) ([]ResumeItem, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []ResumeItem
+	out := []ResumeItem{}
 	for rows.Next() {
 		var it ResumeItem
 		var wt, repo string

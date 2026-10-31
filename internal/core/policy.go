@@ -169,7 +169,7 @@ func (s *Service) Check(ctx context.Context, c Caller, req CheckRequest) (Decisi
 
 // SetPolicy replaces an agent's policy.
 func (s *Service) SetPolicy(ctx context.Context, c Caller, agent string, p Policy) error {
-	if err := requireHuman(c); err != nil {
+	if err := requireOwnerToken(c); err != nil {
 		return err
 	}
 	if err := p.Validate(); err != nil {
