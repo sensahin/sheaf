@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/sensahin/sheaf/internal/api"
+	"github.com/sensahin/sheaf/internal/cmux"
 	"github.com/sensahin/sheaf/internal/config"
 	"github.com/sensahin/sheaf/internal/core"
 	"github.com/sensahin/sheaf/internal/herdr"
@@ -361,15 +362,18 @@ func cmdRun(ctx context.Context, paths config.Paths, c *api.Client, args []strin
 	report := func(ctx context.Context, r core.StatusReport) error {
 		return c.Call(ctx, "agent.report_status", r, nil)
 	}
-	// Inside herdr, mirror the status into herdr's sidebar too, and give
-	// herdr the command that brings this agent back after a restart.
-	pane, inHerdr := herdr.Detect()
-	if inHerdr {
+	// Inside herdr or cmux, mirror the status into the terminal's sidebar
+	// too. herdr also gets the command that brings this agent back after a
+	// restart.
+	mirrors := terminalMirrors()
+	if len(mirrors) > 0 {
 		resume := herdrResume(ctx, c, who.Name, *task)
 		toDaemon := report
 		report = func(ctx context.Context, r core.StatusReport) error {
 			err := toDaemon(ctx, r)
-			pane.Report(ctx, who.Name, r, resume)
+			for _, m := range mirrors {
+				m.Report(ctx, who.Name, r, resume)
+			}
 			resume = nil // once is enough
 			return err
 		}
@@ -384,14 +388,42 @@ func cmdRun(ctx context.Context, paths config.Paths, c *api.Client, args []strin
 		Stdout:  os.Stdout,
 		Report:  report,
 	})
-	if inHerdr {
-		pane.Release(context.Background(), who.Name)
+	for _, m := range mirrors {
+		m.Release(context.Background(), who.Name)
 	}
 	if err != nil {
 		return err
 	}
 	os.Exit(code)
 	return nil
+}
+
+// statusMirror shows an agent's status in the terminal it runs in.
+type statusMirror interface {
+	Report(ctx context.Context, agent string, r core.StatusReport, resume []string) error
+	Release(ctx context.Context, agent string) error
+}
+
+// terminalMirrors lists the agent terminals this process runs inside.
+func terminalMirrors() []statusMirror {
+	var m []statusMirror
+	if p, ok := herdr.Detect(); ok {
+		m = append(m, p)
+	}
+	if w, ok := cmux.Detect(); ok {
+		m = append(m, w)
+	}
+	return m
+}
+
+// inAgentTerminal reports whether this process runs in a pane of a terminal
+// built for agents (herdr, cmux, Rex) rather than inside tmux. There the
+// current pane is the agent's window, so `sheaf start` runs in it.
+func inAgentTerminal() bool {
+	if os.Getenv("TMUX") != "" {
+		return false
+	}
+	return len(terminalMirrors()) > 0 || os.Getenv("REX_SESSION") != ""
 }
 
 // herdrResume is the command herdr runs to bring agent back in its pane:
@@ -967,11 +999,9 @@ func cmdStart(ctx context.Context, paths config.Paths, c *api.Client, args []str
 	}
 
 	spec := launch.Spec{Agent: name, Task: *task, Dir: dir, Command: command, Sheaf: self()}
-	// In a herdr pane (and not in tmux inside it), the pane is the window:
-	// run here, and `sheaf run` reports the status to herdr as well.
-	_, inHerdr := herdr.Detect()
-	inHerdr = inHerdr && os.Getenv("TMUX") == ""
-	if *here || inHerdr || exec.Command("tmux", "-V").Run() != nil {
+	// In a herdr, cmux or Rex pane, the pane is the agent's window: run here,
+	// and `sheaf run` mirrors the status into that terminal.
+	if *here || inAgentTerminal() || exec.Command("tmux", "-V").Run() != nil {
 		if err := os.Chdir(dir); err != nil {
 			return err
 		}
