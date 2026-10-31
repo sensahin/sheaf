@@ -18,9 +18,10 @@ const (
 	StateWorking = "working"
 	StateBlocked = "blocked"
 	StateDone    = "done"
+	StateError   = "error"
 )
 
-var validStates = map[string]bool{StateIdle: true, StateWorking: true, StateBlocked: true, StateDone: true}
+var validStates = map[string]bool{StateIdle: true, StateWorking: true, StateBlocked: true, StateDone: true, StateError: true}
 
 var nameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 
@@ -155,8 +156,7 @@ func (s *Service) GetAgent(ctx context.Context, name string) (Agent, error) {
 type StatusReport struct {
 	State string `json:"state"`
 	Note  string `json:"note,omitempty"`
-	// Task, if set, also moves that task: working→working, blocked→blocked,
-	// done→done.
+	// Task, if set, also moves that task for working, blocked and done.
 	Task string `json:"task,omitempty"`
 }
 
@@ -166,14 +166,14 @@ func (s *Service) ReportStatus(ctx context.Context, c Caller, r StatusReport) er
 		return invalidf("only agents report status")
 	}
 	if !validStates[r.State] {
-		return invalidf("state %q must be idle, working, blocked or done", r.State)
+		return invalidf("state %q must be idle, working, blocked, done or error", r.State)
 	}
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		now := s.now()
 		if _, err := tx.Exec(`UPDATE agents SET state = ?, note = ?, updated_at = ? WHERE name = ?`, r.State, r.Note, now, c.Name); err != nil {
 			return err
 		}
-		if r.Task != "" && r.State != StateIdle {
+		if r.Task != "" && (r.State == StateWorking || r.State == StateBlocked || r.State == StateDone) {
 			t, err := s.getTask(ctx, tx, r.Task)
 			if err != nil {
 				return err

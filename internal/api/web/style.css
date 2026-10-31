@@ -120,6 +120,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .dot.working { background: var(--signal); }
 .dot.blocked { background: var(--band); }
 .dot.done { background: var(--ink); }
+.dot.error { background: var(--hold); }
 .agent .note { color: var(--muted); margin: 6px 0 0; }
 .agent .note:empty { display: none; }
 .tasks { margin: 8px 0 0; padding: 0; list-style: none; font-size: 14px; }
