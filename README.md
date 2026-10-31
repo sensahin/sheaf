@@ -68,6 +68,9 @@ sheaf setup cursor         # .cursor/hooks.json + .cursor/mcp.json
 sheaf setup gemini         # .gemini/settings.json (hook + MCP)
 sheaf setup droid          # .factory/hooks.json
 sheaf setup antigravity    # .agents/hooks.json + MCP entry to add
+sheaf setup cline          # .clinerules/hooks/PreToolUse + MCP entry to add
+sheaf setup windsurf       # .windsurf/hooks.json + .windsurf/mcp_config.json
+sheaf setup junie          # .junie/mcp/mcp.json (MCP only)
 ```
 
 `sheaf setup` creates missing files and never rewrites a config you already
@@ -98,6 +101,10 @@ hooks stay out of the way.
 | Gemini CLI, Qwen Code | allow or deny | `BeforeTool` hook; a deny reason reaches the model as the tool's error |
 | Factory Droid | allow, deny, or hand back to its prompt | PreToolUse hook (Claude Code format, Droid's tool names) |
 | Google Antigravity | deny, or force its own prompt | PreToolUse hook; some agy versions prompt even after an approval |
+| Cline | deny | `PreToolUse` hook script; unanswered falls back to Cline's approval |
+| Windsurf (Cascade) | deny | `pre_run_command`, `pre_write_code`, `pre_mcp_tool_use` hooks, which block by exit status |
+| JetBrains Junie | messaging and status only | MCP; Junie has no pre-tool hooks yet |
+| Aider, Kiro, anything else | status and worktrees | `sheaf start` / `sheaf run`; Aider has no hooks or MCP |
 | Anything with MCP | messaging and status only | run `sheaf mcp` on stdio |
 
 The Claude Code and OpenCode adapters have been run against the real

@@ -22,6 +22,8 @@ var DefaultCommands = map[string]string{
 	"qwen":        "qwen",
 	"droid":       "droid",
 	"antigravity": "agy",
+	"aider":       "aider",
+	"kiro":        "kiro-cli",
 	"amp":         "amp",
 	"goose":       "goose session",
 	"pi":          "pi",

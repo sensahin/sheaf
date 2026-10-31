@@ -308,9 +308,21 @@ func TestEveryAdapterAnswersInItsOwnFormat(t *testing.T) {
 		"gemini":      {`{"tool_name":"run_shell_command","tool_input":{"command":"CMD"},"cwd":"/tmp","hook_event_name":"BeforeTool"}`, `"decision":"deny"`, ""},
 		"droid":       {`{"tool_name":"Execute","tool_input":{"command":"CMD"},"cwd":"/tmp"}`, `"permissionDecision":"deny"`, ""},
 		"antigravity": {`{"toolCall":{"name":"run_command","args":{"CommandLine":"CMD"}},"workspacePaths":["/tmp"]}`, `"decision":"deny"`, ""},
+		"cline":       {`{"clineVersion":"3.40","hookName":"PreToolUse","workspaceRoots":["/tmp"],"preToolUse":{"toolName":"execute_command","parameters":{"command":"CMD"}}}`, `"cancel":true`, `{"cancel":false}`},
 		"opencode":    {`{"tool":"bash","args":{"command":"CMD"},"cwd":"/tmp"}`, `"decision":"deny"`, `{"decision":""}`},
 	}
+	// Windsurf blocks by exit status, so its deny is an error.
+	ws := `{"agent_action_name":"pre_run_command","tool_info":{"command_line":"CMD","cwd":"/tmp"}}`
+	if _, err := hook.Windsurf(ctx, agent, strings.NewReader(strings.ReplaceAll(ws, "CMD", cmd)), time.Second); err == nil {
+		t.Error("windsurf: force push not blocked")
+	}
+	if out, err := hook.Windsurf(ctx, agent, strings.NewReader(strings.ReplaceAll(ws, "CMD", "go test")), time.Second); err != nil || len(out) != 0 {
+		t.Errorf("windsurf allow: %q %v", out, err)
+	}
 	for kind, adapter := range hook.Adapters {
+		if kind == "windsurf" {
+			continue
+		}
 		tc, ok := cases[kind]
 		if !ok {
 			t.Errorf("no test case for adapter %s", kind)
