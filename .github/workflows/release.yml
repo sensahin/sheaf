@@ -20,7 +20,11 @@ jobs:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
+        # The release may already exist if it was drafted on GitHub, which
+        # also creates the tag; then only the files are added.
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.zip dist/checksums.txt \
-            --title "Sheaf $GITHUB_REF_NAME" --generate-notes \
-            $(case "$GITHUB_REF_NAME" in *-*) echo --prerelease;; esac)
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --title "Sheaf $GITHUB_REF_NAME" --generate-notes \
+              $(case "$GITHUB_REF_NAME" in *-*) echo --prerelease;; esac)
+          fi
+          gh release upload "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.zip dist/checksums.txt --clobber
