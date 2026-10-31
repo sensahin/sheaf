@@ -174,7 +174,7 @@ footer a { color: var(--muted); }
     <div class="steps">
       <div class="step">
         <h3>Connect your agents</h3>
-        <p>Once per project, Sheaf writes the agent's hook and MCP config. It never rewrites a config you already have.</p>
+        <p>Once per project, Sheaf writes the agent's hook and MCP config. It merges into your existing config and keeps a backup.</p>
 <pre class="term"><span class="p">$ </span>sheaf setup claude-code
 <span class="p">$ </span>sheaf setup codex</pre>
       </div>

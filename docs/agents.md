@@ -17,9 +17,13 @@ Sheaf connects to each coding agent in up to three ways:
 
 `sheaf setup KIND` in a project writes the hook and MCP files for one agent.
 It creates files that don't exist and rewrites only files it owns, such as a
-plugin it wrote before. When a file is yours already (your
-`.claude/settings.json`, your `opencode.json`), it leaves it alone and prints
-exactly what to add. `--print` shows everything without writing anything.
+plugin it wrote before. When a JSON config is yours already (your
+`.claude/settings.json`, your `opencode.json`), it merges Sheaf's entries in:
+objects merge key by key, hook lists gain Sheaf's entry, any value you set
+wins, and the original is saved as `FILE.sheaf-backup`. Running it again
+changes nothing. A file it can't merge (TOML, YAML, JSON with comments) is
+left alone, and setup prints exactly what to add. `--print` shows everything
+without writing anything.
 
 Hooks find the agent by `SHEAF_TOKEN`. `sheaf start AGENT` sets it, so the
 config files hold no secret. An agent started without the token, such as one
@@ -63,8 +67,8 @@ sheaf setup claude-code
 
 Writes `.claude/settings.json` with a `PreToolUse` hook for every tool and
 status hooks (`UserPromptSubmit` and `PostToolUse` → working, `Notification`
-→ blocked, `Stop` → idle), and prints the `claude mcp add` command for the
-MCP server. The notification text, such as "Claude needs your permission to
+→ blocked, `Stop` → idle), merged into your settings if you have some, and
+runs `claude mcp add` for the MCP server when `claude` is installed. The notification text, such as "Claude needs your permission to
 use Bash", becomes the agent's status note.
 
 ## Codex CLI
