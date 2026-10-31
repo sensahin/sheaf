@@ -204,3 +204,87 @@ func TestClaudeCodeHook(t *testing.T) {
 		t.Fatalf("unanswered: %v", got)
 	}
 }
+
+func TestCodexAndOpenCodeHooks(t *testing.T) {
+	ctx := context.Background()
+	client := daemon(t)
+	human := client("owner")
+	var builder api.AddAgentResp
+	if err := human.Call(ctx, "agent.add", core.AgentSpec{Name: "builder", Kind: "codex"}, &builder); err != nil {
+		t.Fatal(err)
+	}
+	pol := core.DefaultPolicy()
+	pol.Rules = append(pol.Rules, core.Rule{Action: core.ActionWrite, Match: "/etc/*", Effect: core.Ask})
+	if err := human.Call(ctx, "agent.set_policy", api.PolicyReq{Name: "builder", Policy: pol}, nil); err != nil {
+		t.Fatal(err)
+	}
+	agent := client(builder.Token)
+
+	codex := func(tool, input string, wait time.Duration) string {
+		t.Helper()
+		payload := `{"tool_name":"` + tool + `","tool_input":` + input + `,"cwd":"/tmp","hook_event_name":"PreToolUse"}`
+		out, err := hook.Codex(ctx, agent, bytes.NewBufferString(payload), wait)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(out) == 0 {
+			return ""
+		}
+		var o struct {
+			H map[string]string `json:"hookSpecificOutput"`
+		}
+		json.Unmarshal(out, &o)
+		return o.H["permissionDecision"]
+	}
+	if got := codex("Bash", `{"command":"go test ./..."}`, time.Second); got != "" {
+		t.Fatalf("allowed: %q", got)
+	}
+	if got := codex("Bash", `{"command":"git push --force origin main"}`, time.Second); got != "deny" {
+		t.Fatalf("force push: %q", got)
+	}
+	// Codex cannot "ask": an unanswered call gets no opinion, not "ask".
+	if got := codex("Bash", `{"command":"sudo reboot"}`, time.Second); got != "" {
+		t.Fatalf("unanswered: %q", got)
+	}
+	// A patch touching a guarded file waits for the human, even when the
+	// patch's other files are fine.
+	go func() {
+		for i := 0; i < 50; i++ {
+			var q []core.Approval
+			human.Call(ctx, "approval.list", api.ApprovalsReq{}, &q)
+			for _, a := range q {
+				if strings.Contains(a.Summary, "/etc/hosts") {
+					human.Call(ctx, "approval.decide", core.DecideRequest{ID: a.ID, Status: core.ApprovalDenied, Answer: "no"}, nil)
+					return
+				}
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
+	patch, _ := json.Marshal(map[string]string{"command": "*** Begin Patch\n*** Update File: README.md\n+x\n*** Update File: /etc/hosts\n+x\n*** End Patch"})
+	if got := codex("apply_patch", string(patch), 5*time.Second); got != "deny" {
+		t.Fatalf("patch: %q", got)
+	}
+
+	opencode := func(tool, args string) hook.OpenCodeOutput {
+		t.Helper()
+		out, err := hook.OpenCode(ctx, agent, bytes.NewBufferString(`{"tool":"`+tool+`","args":`+args+`,"cwd":"/tmp"}`), time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var o hook.OpenCodeOutput
+		if err := json.Unmarshal(out, &o); err != nil {
+			t.Fatal(err)
+		}
+		return o
+	}
+	if o := opencode("bash", `{"command":"go build"}`); o.Decision != "" {
+		t.Fatalf("opencode allowed: %+v", o)
+	}
+	if o := opencode("bash", `{"command":"git push --force"}`); o.Decision != "deny" || o.Reason == "" {
+		t.Fatalf("opencode force push: %+v", o)
+	}
+	if o := opencode("read", `{"filePath":"/etc/passwd"}`); o.Decision != "" {
+		t.Fatalf("opencode read: %+v", o)
+	}
+}

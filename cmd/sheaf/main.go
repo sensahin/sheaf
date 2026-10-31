@@ -26,6 +26,7 @@ import (
 	"github.com/sensahin/sheaf/internal/launch"
 	"github.com/sensahin/sheaf/internal/mcpserver"
 	agentrun "github.com/sensahin/sheaf/internal/run"
+	"github.com/sensahin/sheaf/internal/setup"
 	"github.com/sensahin/sheaf/internal/store"
 	"rsc.io/qr"
 )
@@ -74,6 +75,8 @@ Recovery and audit
   sheaf log [--follow] [--after N]
 
 Launching agents
+  sheaf setup claude-code|codex|opencode [--print]
+                                   connect an agent program in this project
   sheaf start AGENT [--task T] [--here] [-- CMD]
                                    open the agent in a tmux window (or here),
                                    with its status tracked
@@ -84,8 +87,8 @@ For agents
                                    run an agent and report the status it
                                    prints (OSC 7501)
   sheaf mcp                        MCP server on stdio (needs SHEAF_TOKEN)
-  sheaf hook claude-code [--wait SECONDS]
-                                   PreToolUse hook that routes to your queue
+  sheaf hook claude-code|codex|opencode [--wait SECONDS]
+                                   pre-tool hook that routes to your queue
 
 State lives in $SHEAF_HOME (default ~/.sheaf).
 `
@@ -117,6 +120,8 @@ func run(args []string) error {
 		return cmdInit(ctx, paths)
 	case "daemon":
 		return cmdDaemon(ctx, paths, rest)
+	case "setup":
+		return cmdSetup(rest)
 	}
 
 	c, err := client(paths)
@@ -517,7 +522,7 @@ func cmdAgent(ctx context.Context, paths config.Paths, c *api.Client, args []str
 		if err := paths.SaveAgentToken(r.Agent.Name, r.Token); err != nil {
 			return err
 		}
-		printAgentSetup(paths, r.Agent.Name, r.Token)
+		printAgentSetup(paths, r.Agent.Name, r.Agent.Kind, r.Token)
 		return nil
 	case "rm", "remove":
 		if err := need(pos, 1, "agent rm NAME"); err != nil {
@@ -539,7 +544,7 @@ func cmdAgent(ctx context.Context, paths config.Paths, c *api.Client, args []str
 			return err
 		}
 		fmt.Println("The old token no longer works.")
-		printAgentSetup(paths, pos[0], r.Token)
+		printAgentSetup(paths, pos[0], "", r.Token)
 		return nil
 	case "policy":
 		if err := need(pos, 1, "agent policy NAME [--set FILE]"); err != nil {
@@ -566,26 +571,74 @@ func cmdAgent(ctx context.Context, paths config.Paths, c *api.Client, args []str
 	return fmt.Errorf("unknown agent command %q", args[0])
 }
 
-func printAgentSetup(paths config.Paths, name, token string) {
-	self := self()
+func printAgentSetup(paths config.Paths, name, kind, token string) {
+	connect := "Connect your agent program to Sheaf once per project, for example:\n\n  sheaf setup claude-code    (or codex, opencode)"
+	if _, err := setup.For(kind, ""); err == nil {
+		connect = "Connect " + kind + " to Sheaf once per project:\n\n  sheaf setup " + kind
+	}
 	fmt.Printf(`Agent %[1]q is ready. Start it with:
 
   sheaf start %[1]s [--task ID]
 
 That runs it under "sheaf run", which hands it its token, so its own config
-needs no secret. For Claude Code, once:
-
-  claude mcp add --scope user sheaf -- %[2]s mcp
-
-and, to route its permission prompts to your queue, in .claude/settings.json:
-
-  {"hooks":{"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"%[2]s hook claude-code"}]}]}}
+needs no secret. %[2]s
 
 Starting it some other way? Give it this token as SHEAF_TOKEN (also saved,
 owner-only, in %[3]s):
 
   SHEAF_TOKEN=%[4]s
-`, name, self, paths.AgentTokenPath(name), token)
+`, name, connect, paths.AgentTokenPath(name), token)
+}
+
+func cmdSetup(args []string) error {
+	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
+	dir := fs.String("dir", ".", "project directory to write the config into")
+	printOnly := fs.Bool("print", false, "print the config instead of writing it")
+	pos, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(pos) != 1 {
+		return fmt.Errorf("usage: sheaf setup KIND [--dir DIR] [--print]  (KIND: %s)", strings.Join(setup.Kinds(), ", "))
+	}
+	plan, err := setup.For(pos[0], self())
+	if err != nil {
+		return err
+	}
+	if *printOnly {
+		for _, f := range plan.Files {
+			fmt.Printf("# %s\n%s\n", f.Path, f.Content)
+		}
+	} else {
+		results, err := setup.Apply(*dir, plan)
+		if err != nil {
+			return err
+		}
+		for _, r := range results {
+			switch r.Status {
+			case "skipped":
+				fmt.Printf("%s already exists, so Sheaf left it alone. Add this to it:\n\n%s\n", r.Path, indent(r.Content))
+			case "ok":
+				fmt.Printf("%s is already set up.\n", r.Path)
+			default:
+				fmt.Printf("%s %s.\n", r.Status, r.Path)
+			}
+		}
+	}
+	for _, s := range plan.Steps {
+		fmt.Printf("\n%s\n", indent(s))
+	}
+	return nil
+}
+
+func indent(s string) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	for i, l := range lines {
+		if l != "" {
+			lines[i] = "  " + l
+		}
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
 func cmdTask(ctx context.Context, c *api.Client, args []string) error {
@@ -964,15 +1017,20 @@ func cmdLog(ctx context.Context, c *api.Client, args []string) error {
 }
 
 func cmdHook(ctx context.Context, c *api.Client, args []string) error {
-	if len(args) == 0 || args[0] != "claude-code" {
-		return fmt.Errorf("usage: sheaf hook claude-code [--wait SECONDS]")
+	hooks := map[string]func(context.Context, *api.Client, io.Reader, time.Duration) ([]byte, error){
+		"claude-code": hook.ClaudeCode,
+		"codex":       hook.Codex,
+		"opencode":    hook.OpenCode,
+	}
+	if len(args) == 0 || hooks[args[0]] == nil {
+		return fmt.Errorf("usage: sheaf hook claude-code|codex|opencode [--wait SECONDS]")
 	}
 	fs := flag.NewFlagSet("hook", flag.ContinueOnError)
 	wait := fs.Int("wait", 600, "seconds to wait for your decision before falling back to the agent's own prompt")
 	if _, err := parse(fs, args[1:]); err != nil {
 		return err
 	}
-	out, err := hook.ClaudeCode(ctx, c, os.Stdin, time.Duration(*wait)*time.Second)
+	out, err := hooks[args[0]](ctx, c, os.Stdin, time.Duration(*wait)*time.Second)
 	if err != nil {
 		return err
 	}

@@ -1,9 +1,3 @@
-// Package hook connects agents' own permission hooks to Sheaf's broker.
-//
-// For Claude Code, `sheaf hook claude-code` is a PreToolUse hook. It maps each
-// tool call to a Sheaf action, checks the agent's policy, and for "ask" puts
-// the call in the human's queue and waits for a decision, so you can approve
-// from wherever you read the queue instead of the agent's terminal.
 package hook
 
 import (
@@ -19,8 +13,9 @@ import (
 	"github.com/sensahin/sheaf/internal/core"
 )
 
-// ClaudeCodeInput is the part of Claude Code's PreToolUse payload we read.
-type ClaudeCodeInput struct {
+// PreToolUseInput is the part of a Claude Code or Codex PreToolUse payload
+// Sheaf reads. The two agents share the format.
+type PreToolUseInput struct {
 	ToolName  string          `json:"tool_name"`
 	ToolInput json.RawMessage `json:"tool_input"`
 	Cwd       string          `json:"cwd"`
@@ -34,32 +29,64 @@ type hookOutput struct {
 	} `json:"hookSpecificOutput"`
 }
 
-// Action maps a Claude Code tool call to a Sheaf action and target. ok is
-// false for calls Sheaf does not police, such as reads and Sheaf's own tools.
-func Action(in ClaudeCodeInput) (action, target string, ok bool) {
-	var ti map[string]any
-	json.Unmarshal(in.ToolInput, &ti)
-	str := func(k string) string { s, _ := ti[k].(string); return s }
+// fields reads a tool_input object; a non-object reads as empty.
+func fields(raw json.RawMessage) map[string]any {
+	var m map[string]any
+	json.Unmarshal(raw, &m)
+	return m
+}
+
+func str(m map[string]any, keys ...string) string {
+	for _, k := range keys {
+		switch v := m[k].(type) {
+		case string:
+			if v != "" {
+				return v
+			}
+		case []any: // argv form, as some agents send commands
+			parts := make([]string, 0, len(v))
+			for _, p := range v {
+				if s, ok := p.(string); ok {
+					parts = append(parts, s)
+				}
+			}
+			if len(parts) > 0 {
+				return strings.Join(parts, " ")
+			}
+		}
+	}
+	return ""
+}
+
+func host(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return raw
+	}
+	return u.Hostname()
+}
+
+func claudeCall(in PreToolUseInput) (Call, bool) {
+	ti := fields(in.ToolInput)
+	c := Call{Tool: in.ToolName, Cwd: in.Cwd}
 	switch in.ToolName {
 	case "Bash":
-		return core.ActionShell, str("command"), true
+		c.Action, c.Targets = core.ActionShell, []string{str(ti, "command")}
 	case "Write", "Edit", "MultiEdit":
-		return core.ActionWrite, str("file_path"), true
+		c.Action, c.Targets = core.ActionWrite, []string{str(ti, "file_path")}
 	case "NotebookEdit":
-		return core.ActionWrite, str("notebook_path"), true
+		c.Action, c.Targets = core.ActionWrite, []string{str(ti, "notebook_path")}
 	case "WebFetch":
-		u, err := url.Parse(str("url"))
-		if err != nil || u.Host == "" {
-			return core.ActionNetwork, str("url"), true
-		}
-		return core.ActionNetwork, u.Hostname(), true
+		c.Action, c.Targets = core.ActionNetwork, []string{host(str(ti, "url"))}
 	case "Read", "Glob", "Grep", "LS", "TodoWrite", "TodoRead":
-		return "", "", false
+		return Call{}, false
+	default:
+		if strings.HasPrefix(in.ToolName, "mcp__sheaf__") {
+			return Call{}, false
+		}
+		c.Action, c.Targets = core.ActionTool, []string{in.ToolName}
 	}
-	if strings.HasPrefix(in.ToolName, "mcp__sheaf__") {
-		return "", "", false
-	}
-	return core.ActionTool, in.ToolName, true
+	return c, true
 }
 
 // ClaudeCode reads a PreToolUse payload from r and returns the hook's stdout.
@@ -67,70 +94,30 @@ func Action(in ClaudeCodeInput) (action, target string, ok bool) {
 // apply. wait bounds how long an "ask" waits in the queue before falling back
 // to Claude Code's own prompt.
 func ClaudeCode(ctx context.Context, client *api.Client, r io.Reader, wait time.Duration) ([]byte, error) {
-	var in ClaudeCodeInput
+	var in PreToolUseInput
 	if err := json.NewDecoder(r).Decode(&in); err != nil {
 		return nil, fmt.Errorf("reading hook input: %w", err)
 	}
-	action, target, ok := Action(in)
+	call, ok := claudeCall(in)
 	if !ok {
 		return nil, nil
 	}
-	var who core.Caller
-	if err := client.Call(ctx, "whoami", nil, &who); err != nil {
-		return decision("ask", "Sheaf could not check this call: "+err.Error()), nil
+	v := Decide(ctx, client, call, wait)
+	switch {
+	case v.Unresolved:
+		// Claude Code supports "ask": hand the call back to its own prompt.
+		return preToolUse("ask", v.Reason), nil
+	case v.Effect != "":
+		return preToolUse(v.Effect, v.Reason), nil
 	}
-	if who.IsHuman() {
-		// Not running as a Sheaf agent (no SHEAF_TOKEN): no opinion.
-		return nil, nil
-	}
-	var d core.Decision
-	if err := client.Call(ctx, "policy.check", core.CheckRequest{Action: action, Target: target, Cwd: in.Cwd}, &d); err != nil {
-		return decision("ask", "Sheaf could not check this call: "+err.Error()), nil
-	}
-	switch d.Effect {
-	case core.Allow:
-		return nil, nil
-	case core.Deny:
-		return decision("deny", "Sheaf policy denies this ("+d.Reason+")"), nil
-	}
-
-	var a core.Approval
-	summary := fmt.Sprintf("%s: %s", in.ToolName, oneLine(target, 120))
-	if err := client.Call(ctx, "approval.request", core.ApprovalRequest{Kind: core.ApprovalAction, Summary: summary, Detail: target}, &a); err != nil {
-		return decision("ask", "Sheaf could not queue this call: "+err.Error()), nil
-	}
-	if err := client.Call(ctx, "approval.wait", api.WaitReq{ID: a.ID, WaitSeconds: int(wait / time.Second)}, &a); err != nil {
-		return decision("ask", "Sheaf lost track of "+a.ID+": "+err.Error()), nil
-	}
-	switch a.Status {
-	case core.ApprovalApproved:
-		return decision("allow", "approved in Sheaf ("+a.ID+")"+note(a.Answer)), nil
-	case core.ApprovalDenied:
-		return decision("deny", "denied in Sheaf ("+a.ID+")"+note(a.Answer)), nil
-	}
-	return decision("ask", "no decision in Sheaf yet ("+a.ID+"); "+d.Reason), nil
+	return nil, nil
 }
 
-func decision(effect, reason string) []byte {
+func preToolUse(effect, reason string) []byte {
 	var o hookOutput
 	o.HookSpecificOutput.HookEventName = "PreToolUse"
 	o.HookSpecificOutput.PermissionDecision = effect
 	o.HookSpecificOutput.PermissionDecisionReason = reason
 	b, _ := json.Marshal(o)
 	return b
-}
-
-func note(s string) string {
-	if s == "" {
-		return ""
-	}
-	return ": " + s
-}
-
-func oneLine(s string, n int) string {
-	s = strings.Join(strings.Fields(s), " ")
-	if len(s) > n {
-		s = s[:n-1] + "…"
-	}
-	return s
 }

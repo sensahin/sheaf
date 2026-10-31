@@ -55,24 +55,40 @@ sheaf agent add planner --kind claude-code --resume "claude --continue"
 sheaf agent add builder --kind codex --resume "codex resume --last"
 ```
 
-`sheaf agent add` prints the agent's token and the lines to paste into the
-agent's config. For Claude Code:
+Connect each agent program once per project. This writes its pre-tool hook
+(so its permission prompts go to your Sheaf queue) and its MCP server entry
+(so it can message other agents):
 
 ```sh
-claude mcp add sheaf --env SHEAF_TOKEN=sha_... -- sheaf mcp
+sheaf setup claude-code    # .claude/settings.json + `claude mcp add`
+sheaf setup codex          # .codex/hooks.json + ~/.codex/config.toml entry
+sheaf setup opencode       # .opencode/plugins/sheaf.js + opencode.json
 ```
 
-and, to route its permission prompts through your Sheaf queue, a PreToolUse
-hook in `.claude/settings.json`:
+`sheaf setup` creates missing files and never rewrites a config you already
+have; it prints what to add instead. `--print` shows everything without
+writing.
 
-```json
-{"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [
-  {"type": "command", "command": "SHEAF_TOKEN=sha_... sheaf hook claude-code"}
-]}]}}
+Then start agents through Sheaf:
+
+```sh
+sheaf start planner                   # a tmux window named "planner"
+sheaf start builder --task t-7xa6x441 # in that task's worktree
 ```
 
-Any MCP client works the same way: run `sheaf mcp` on stdio with
-`SHEAF_TOKEN` in its environment.
+`sheaf start` opens each agent in its own tmux window (or in the current
+terminal with `--here`, or when tmux isn't installed), already wrapped in
+`sheaf run`, so its status is tracked from the first second. The agent gets
+its token from Sheaf, so its config holds no secret. Started outside Sheaf,
+an agent needs `SHEAF_TOKEN`, which `sheaf agent add` prints; without it the
+hooks stay out of the way.
+
+| Agent | Approvals | Notes |
+|---|---|---|
+| Claude Code | allow, deny, or hand back to its prompt | PreToolUse hook |
+| Codex CLI | allow or deny | PreToolUse hook; patches are checked file by file. Codex has no "ask" answer, so an unanswered call falls back to Codex's own approval policy. Trust the hook once with `/hooks`. |
+| OpenCode | deny | `tool.execute.before` plugin; an unanswered call falls back to OpenCode's own permissions |
+| Anything with MCP | messaging and status only | run `sheaf mcp` on stdio |
 
 ## A session
 
@@ -176,8 +192,8 @@ sheaf send | inbox
 sheaf queue | show | approve | deny | answer
 sheaf pair | device ls|revoke
 sheaf log [--follow]
-sheaf start AGENT | resume [--tmux] | tmux-status
-sheaf run -- CMD | mcp | hook claude-code
+sheaf setup KIND | start AGENT | resume [--tmux] | tmux-status
+sheaf run -- CMD | mcp | hook claude-code|codex|opencode
 ```
 
 ## Policies
