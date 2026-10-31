@@ -20,6 +20,8 @@ var DefaultCommands = map[string]string{
 	"cursor":      "cursor-agent",
 	"gemini":      "gemini",
 	"qwen":        "qwen",
+	"droid":       "droid",
+	"antigravity": "agy",
 	"amp":         "amp",
 	"goose":       "goose session",
 	"pi":          "pi",

@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -53,4 +54,20 @@ func TestMoreAgentsMapping(t *testing.T) {
 	check("gemini sheaf tool", c, ok, "")
 	c, ok = geminiCall(PreToolUseInput{ToolName: "read_file"})
 	check("gemini read", c, ok, "")
+
+	c, ok = droidCall(PreToolUseInput{ToolName: "Execute", ToolInput: []byte(`{"command":"make"}`)})
+	check("droid execute", c, ok, core.ActionShell, "make")
+	c, ok = droidCall(PreToolUseInput{ToolName: "Create", ToolInput: []byte(`{"file_path":"/p/n.go","content":"x"}`)})
+	check("droid create", c, ok, core.ActionWrite, "/p/n.go")
+	c, ok = droidCall(PreToolUseInput{ToolName: "mcp__sheaf__send"})
+	check("droid sheaf tool", c, ok, "")
+
+	c, ok = antigravityCall(antigravityInput{ToolCall: struct {
+		Name string          `json:"name"`
+		Args json.RawMessage `json:"args"`
+	}{"run_command", []byte(`{"CommandLine":"cat /etc/hosts"}`)}, WorkspacePaths: []string{"/w"}})
+	check("agy run_command", c, ok, core.ActionShell, "cat /etc/hosts")
+	if c.Cwd != "/w" {
+		t.Errorf("agy cwd: %q", c.Cwd)
+	}
 }

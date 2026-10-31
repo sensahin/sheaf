@@ -47,7 +47,8 @@ queue. Adapters for other agents' hook systems follow the same shape: each
 targets; a patch has one target per file), `hook.Decide` applies the policy
 and the queue, and the adapter writes the answer in the agent's format.
 `sheaf setup KIND` writes the agent's hook and MCP config. Claude Code, Codex,
-OpenCode, Copilot CLI, Cursor and Gemini CLI work this way today.
+OpenCode, Copilot CLI, Cursor, Gemini CLI, Factory Droid and Antigravity work
+this way today.
 
 **Worktrees before containers.** A worktree per task stops agents from
 editing the same checkout, which is the most common collision, at zero cost.
@@ -112,8 +113,7 @@ many tasks can be resumed when it starts.
    encrypted relay so the web queue works away from home without a VPN.
 2. Adapters for every popular agent, before the desktop app (research in
    order of adoption and hook support):
-   Antigravity; then Factory Droid, Windsurf, Cline, Kiro, Goose and
-   Amp plugins; Junie through MCP only, Aider through `sheaf run` only.
+   Windsurf (now Devin Local), Cline, Kiro, Goose and Amp plugins; Junie through MCP only, Aider through `sheaf run` only.
    Agent hook events (stop, notification) feed status, not just approvals.
    Terminal adapters: herdr, Rex and cmux panes. A Homebrew tap.
 3. Signed macOS app identity for the daemon, so TCC and Local Network

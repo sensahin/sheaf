@@ -306,6 +306,8 @@ func TestEveryAdapterAnswersInItsOwnFormat(t *testing.T) {
 		"copilot":     {`{"toolName":"bash","toolArgs":{"command":"CMD"},"cwd":"/tmp","timestamp":1}`, `"permissionDecision":"deny"`, ""},
 		"cursor":      {`{"tool_name":"Shell","tool_input":{"command":"CMD"},"cwd":"/tmp","hook_event_name":"preToolUse"}`, `"permission":"deny"`, "{}"},
 		"gemini":      {`{"tool_name":"run_shell_command","tool_input":{"command":"CMD"},"cwd":"/tmp","hook_event_name":"BeforeTool"}`, `"decision":"deny"`, ""},
+		"droid":       {`{"tool_name":"Execute","tool_input":{"command":"CMD"},"cwd":"/tmp"}`, `"permissionDecision":"deny"`, ""},
+		"antigravity": {`{"toolCall":{"name":"run_command","args":{"CommandLine":"CMD"}},"workspacePaths":["/tmp"]}`, `"decision":"deny"`, ""},
 		"opencode":    {`{"tool":"bash","args":{"command":"CMD"},"cwd":"/tmp"}`, `"decision":"deny"`, `{"decision":""}`},
 	}
 	for kind, adapter := range hook.Adapters {

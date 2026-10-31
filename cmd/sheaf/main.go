@@ -76,8 +76,8 @@ Recovery and audit
 
 Launching agents
   sheaf setup KIND [--print]       connect an agent program in this project
-                                   (claude-code, codex, copilot, cursor,
-                                   gemini, opencode)
+                                   (antigravity, claude-code, codex, copilot,
+                                   cursor, droid, gemini, opencode)
   sheaf start AGENT [--task T] [--here] [-- CMD]
                                    open the agent in a tmux window (or here),
                                    with its status tracked
@@ -573,7 +573,7 @@ func cmdAgent(ctx context.Context, paths config.Paths, c *api.Client, args []str
 }
 
 func printAgentSetup(paths config.Paths, name, kind, token string) {
-	connect := "Connect your agent program to Sheaf once per project, for example:\n\n  sheaf setup claude-code    (or codex, copilot, cursor, gemini, opencode)"
+	connect := "Connect your agent program to Sheaf once per project, for example:\n\n  sheaf setup claude-code    (see `sheaf setup` for the list)"
 	if _, err := setup.For(kind, ""); err == nil {
 		connect = "Connect " + kind + " to Sheaf once per project:\n\n  sheaf setup " + kind
 	}
