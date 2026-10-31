@@ -23,6 +23,7 @@ import (
 	"github.com/sensahin/sheaf/internal/config"
 	"github.com/sensahin/sheaf/internal/core"
 	"github.com/sensahin/sheaf/internal/hook"
+	"github.com/sensahin/sheaf/internal/launch"
 	"github.com/sensahin/sheaf/internal/mcpserver"
 	agentrun "github.com/sensahin/sheaf/internal/run"
 	"github.com/sensahin/sheaf/internal/store"
@@ -72,9 +73,16 @@ Recovery and audit
   sheaf resume [--tmux]            restart agents on their unfinished tasks
   sheaf log [--follow] [--after N]
 
+Launching agents
+  sheaf start AGENT [--task T] [--here] [-- CMD]
+                                   open the agent in a tmux window (or here),
+                                   with its status tracked
+  sheaf tmux-status                one line for tmux's status bar
+
 For agents
-  sheaf run [--task T] -- CMD...   run an agent and report the status it
-                                   prints (OSC 7501); needs SHEAF_TOKEN
+  sheaf run [--agent A] [--task T] -- CMD...
+                                   run an agent and report the status it
+                                   prints (OSC 7501)
   sheaf mcp                        MCP server on stdio (needs SHEAF_TOKEN)
   sheaf hook claude-code [--wait SECONDS]
                                    PreToolUse hook that routes to your queue
@@ -119,7 +127,7 @@ func run(args []string) error {
 	case "status":
 		return cmdStatus(ctx, c)
 	case "agent":
-		return cmdAgent(ctx, c, rest)
+		return cmdAgent(ctx, paths, c, rest)
 	case "task":
 		return cmdTask(ctx, c, rest)
 	case "send":
@@ -145,7 +153,11 @@ func run(args []string) error {
 	case "hook":
 		return cmdHook(ctx, c, rest)
 	case "run":
-		return cmdRun(ctx, c, rest)
+		return cmdRun(ctx, paths, c, rest)
+	case "start":
+		return cmdStart(ctx, paths, c, rest)
+	case "tmux-status":
+		return cmdTmuxStatus(ctx, c)
 	case "pair":
 		return cmdPair(ctx, c, rest)
 	case "device":
@@ -312,14 +324,24 @@ func webURL(a *net.TCPAddr) string {
 	return "http://" + net.JoinHostPort(host, fmt.Sprint(a.Port))
 }
 
-func cmdRun(ctx context.Context, c *api.Client, args []string) error {
+func cmdRun(ctx context.Context, paths config.Paths, c *api.Client, args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	task := fs.String("task", "", "task whose status follows the agent's")
+	agent := fs.String("agent", "", "run as this agent, using its saved token instead of SHEAF_TOKEN")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() == 0 {
-		return fmt.Errorf("usage: sheaf run [--task T] -- CMD [ARGS...]")
+		return fmt.Errorf("usage: sheaf run [--agent A] [--task T] -- CMD [ARGS...]")
+	}
+	if *agent != "" {
+		tok, err := paths.LoadAgentToken(*agent)
+		if err != nil {
+			return err
+		}
+		c.Token = tok
+		// The agent's own Sheaf tools (sheaf mcp, the hook) find it here.
+		os.Setenv("SHEAF_TOKEN", tok)
 	}
 	var who core.Caller
 	if err := c.Call(ctx, "whoami", nil, &who); err != nil {
@@ -460,7 +482,7 @@ func cmdStatus(ctx context.Context, c *api.Client) error {
 	return nil
 }
 
-func cmdAgent(ctx context.Context, c *api.Client, args []string) error {
+func cmdAgent(ctx context.Context, paths config.Paths, c *api.Client, args []string) error {
 	if len(args) == 0 {
 		args = []string{"ls"}
 	}
@@ -492,13 +514,19 @@ func cmdAgent(ctx context.Context, c *api.Client, args []string) error {
 		if err := c.Call(ctx, "agent.add", core.AgentSpec{Name: pos[0], Kind: *kind, ResumeCmd: *resume}, &r); err != nil {
 			return err
 		}
-		printAgentSetup(r.Agent.Name, r.Token)
+		if err := paths.SaveAgentToken(r.Agent.Name, r.Token); err != nil {
+			return err
+		}
+		printAgentSetup(paths, r.Agent.Name, r.Token)
 		return nil
 	case "rm", "remove":
 		if err := need(pos, 1, "agent rm NAME"); err != nil {
 			return err
 		}
-		return c.Call(ctx, "agent.remove", api.NameReq{Name: pos[0]}, nil)
+		if err := c.Call(ctx, "agent.remove", api.NameReq{Name: pos[0]}, nil); err != nil {
+			return err
+		}
+		return paths.RemoveAgentToken(pos[0])
 	case "token":
 		if err := need(pos, 1, "agent token NAME"); err != nil {
 			return err
@@ -507,8 +535,11 @@ func cmdAgent(ctx context.Context, c *api.Client, args []string) error {
 		if err := c.Call(ctx, "agent.rotate_token", api.NameReq{Name: pos[0]}, &r); err != nil {
 			return err
 		}
+		if err := paths.SaveAgentToken(pos[0], r.Token); err != nil {
+			return err
+		}
 		fmt.Println("The old token no longer works.")
-		printAgentSetup(pos[0], r.Token)
+		printAgentSetup(paths, pos[0], r.Token)
 		return nil
 	case "policy":
 		if err := need(pos, 1, "agent policy NAME [--set FILE]"); err != nil {
@@ -535,22 +566,26 @@ func cmdAgent(ctx context.Context, c *api.Client, args []string) error {
 	return fmt.Errorf("unknown agent command %q", args[0])
 }
 
-func printAgentSetup(name, token string) {
-	self, err := os.Executable()
-	if err != nil {
-		self = "sheaf"
-	}
-	fmt.Printf(`Agent %q is ready. Its token is shown only once:
+func printAgentSetup(paths config.Paths, name, token string) {
+	self := self()
+	fmt.Printf(`Agent %[1]q is ready. Start it with:
 
-  SHEAF_TOKEN=%s
+  sheaf start %[1]s [--task ID]
 
-Claude Code: connect the tools and route permission checks to your queue
-  claude mcp add sheaf --env SHEAF_TOKEN=%s -- %s mcp
-  and add to .claude/settings.json:
-  {"hooks":{"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"SHEAF_TOKEN=%s %s hook claude-code"}]}]}}
+That runs it under "sheaf run", which hands it its token, so its own config
+needs no secret. For Claude Code, once:
 
-Any other MCP client: run "%s mcp" on stdio with SHEAF_TOKEN in its environment.
-`, name, token, token, self, token, self, self)
+  claude mcp add --scope user sheaf -- %[2]s mcp
+
+and, to route its permission prompts to your queue, in .claude/settings.json:
+
+  {"hooks":{"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"%[2]s hook claude-code"}]}]}}
+
+Starting it some other way? Give it this token as SHEAF_TOKEN (also saved,
+owner-only, in %[3]s):
+
+  SHEAF_TOKEN=%[4]s
+`, name, self, paths.AgentTokenPath(name), token)
 }
 
 func cmdTask(ctx context.Context, c *api.Client, args []string) error {
@@ -756,23 +791,146 @@ func cmdResume(ctx context.Context, c *api.Client, args []string) error {
 			continue
 		}
 		seen[it.Agent] = true
+		spec := launch.Spec{Agent: it.Agent, Task: it.Task, Dir: it.Dir, Command: it.Command, Sheaf: self()}
 		if !*tmux {
-			fmt.Printf("# %s on %s: %s\ncd %q && %s\n\n", it.Agent, it.Task, it.Title, it.Dir, it.Command)
+			fmt.Printf("# %s on %s: %s\ncd %s && %s\n\n", it.Agent, it.Task, it.Title, launch.Quote(it.Dir), spec.Shell())
 			continue
 		}
-		if err := tmuxWindow(it); err != nil {
+		where, err := launch.Tmux(spec, os.Getenv("TMUX") != "")
+		if err != nil {
 			return err
 		}
-		fmt.Printf("resumed %s on %s in tmux session \"sheaf\"\n", it.Agent, it.Task)
+		fmt.Printf("resumed %s on %s in %s\n", it.Agent, it.Task, where)
 	}
 	return nil
 }
 
-func tmuxWindow(it core.ResumeItem) error {
-	if exec.Command("tmux", "has-session", "-t", "sheaf").Run() != nil {
-		return exec.Command("tmux", "new-session", "-d", "-s", "sheaf", "-n", it.Agent, "-c", it.Dir, it.Command).Run()
+func self() string {
+	p, err := os.Executable()
+	if err != nil {
+		return "sheaf"
 	}
-	return exec.Command("tmux", "new-window", "-t", "sheaf", "-n", it.Agent, "-c", it.Dir, it.Command).Run()
+	return p
+}
+
+func cmdStart(ctx context.Context, paths config.Paths, c *api.Client, args []string) error {
+	fs := flag.NewFlagSet("start", flag.ContinueOnError)
+	task := fs.String("task", "", "task to work on; the agent starts in its worktree")
+	here := fs.Bool("here", false, "run in this terminal instead of a tmux window")
+	resume := fs.Bool("resume", false, "use the agent's resume command")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	rest := fs.Args()
+	if len(rest) == 0 {
+		return fmt.Errorf("usage: sheaf start AGENT [--task T] [--here] [--resume] [-- CMD...]")
+	}
+	name, rest := rest[0], rest[1:]
+	// Flags may also follow the agent name.
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+	rest = fs.Args()
+	if len(rest) > 0 && rest[0] == "--" {
+		rest = rest[1:]
+	}
+
+	var a core.Agent
+	if err := c.Call(ctx, "agent.get", api.NameReq{Name: name}, &a); err != nil {
+		return err
+	}
+	if _, err := paths.LoadAgentToken(name); err != nil {
+		return err
+	}
+	command := strings.Join(rest, " ")
+	switch {
+	case command != "":
+	case *resume && a.ResumeCmd != "":
+		command = a.ResumeCmd
+	case launch.DefaultCommands[a.Kind] != "":
+		command = launch.DefaultCommands[a.Kind]
+	default:
+		return fmt.Errorf("no command for agent %q (kind %q): pass one after --", name, a.Kind)
+	}
+
+	dir, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	if *task != "" {
+		var t core.Task
+		if err := c.Call(ctx, "task.get", api.IDReq{ID: *task}, &t); err != nil {
+			return err
+		}
+		if t.Owner != name {
+			return fmt.Errorf("task %s is owned by %q, not %q; hand it off first", t.ID, t.Owner, name)
+		}
+		switch {
+		case t.Worktree != "":
+			dir = t.Worktree
+		case t.Repo != "":
+			dir = t.Repo
+		}
+	}
+
+	spec := launch.Spec{Agent: name, Task: *task, Dir: dir, Command: command, Sheaf: self()}
+	if *here || exec.Command("tmux", "-V").Run() != nil {
+		if err := os.Chdir(dir); err != nil {
+			return err
+		}
+		runArgs := []string{"--agent", name}
+		if *task != "" {
+			runArgs = append(runArgs, "--task", *task)
+		}
+		return cmdRun(ctx, paths, c, append(runArgs, "--", "sh", "-c", command))
+	}
+	where, err := launch.Tmux(spec, os.Getenv("TMUX") != "")
+	if err != nil {
+		return err
+	}
+	fmt.Printf("started %s in %s\n", name, where)
+	return nil
+}
+
+// cmdTmuxStatus prints a short summary for tmux's status bar, for example
+// set -g status-right '#(sheaf tmux-status)'. It prints nothing when there is
+// nothing to say or the daemon is down, so the bar stays clean.
+func cmdTmuxStatus(ctx context.Context, c *api.Client) error {
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	var q []core.Approval
+	var agents []core.Agent
+	if c.Call(ctx, "approval.list", api.ApprovalsReq{}, &q) != nil || c.Call(ctx, "agent.list", nil, &agents) != nil {
+		return nil
+	}
+	fmt.Println(statusLine(len(q), agents))
+	return nil
+}
+
+func statusLine(queued int, agents []core.Agent) string {
+	var working, blocked int
+	for _, a := range agents {
+		switch a.State {
+		case core.StateWorking:
+			working++
+		case core.StateBlocked, core.StateError:
+			blocked++
+		}
+	}
+	var parts []string
+	if queued > 0 {
+		parts = append(parts, fmt.Sprintf("#[fg=colour178,bold]%d need you#[default]", queued))
+	}
+	if blocked > 0 {
+		parts = append(parts, fmt.Sprintf("%d blocked", blocked))
+	}
+	if working > 0 {
+		parts = append(parts, fmt.Sprintf("%d working", working))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "sheaf: " + strings.Join(parts, " · ")
 }
 
 func cmdLog(ctx context.Context, c *api.Client, args []string) error {

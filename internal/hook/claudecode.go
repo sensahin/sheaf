@@ -75,6 +75,14 @@ func ClaudeCode(ctx context.Context, client *api.Client, r io.Reader, wait time.
 	if !ok {
 		return nil, nil
 	}
+	var who core.Caller
+	if err := client.Call(ctx, "whoami", nil, &who); err != nil {
+		return decision("ask", "Sheaf could not check this call: "+err.Error()), nil
+	}
+	if who.IsHuman() {
+		// Not running as a Sheaf agent (no SHEAF_TOKEN): no opinion.
+		return nil, nil
+	}
 	var d core.Decision
 	if err := client.Call(ctx, "policy.check", core.CheckRequest{Action: action, Target: target, Cwd: in.Cwd}, &d); err != nil {
 		return decision("ask", "Sheaf could not check this call: "+err.Error()), nil

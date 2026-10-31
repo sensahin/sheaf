@@ -105,6 +105,20 @@ When the work is ready, the builder asks for review with
 `request_approval(kind="diff", task=...)`, and `sheaf show` prints the diff
 from the task's worktree.
 
+## tmux
+
+After a reboot, `sheaf resume --tmux` reopens every agent that had
+unfinished work, each in its task's worktree with its resume command (such as
+`claude --continue`). Put the queue in your status bar:
+
+```tmux
+set -g status-right '#(sheaf tmux-status) %H:%M'
+set -g status-interval 5
+```
+
+It shows something like `sheaf: 2 need you · 1 blocked · 3 working`, and
+nothing when all is quiet.
+
 ## Status without tool calls
 
 Claude Code, Codex, Amp, goose, opencode and others already print their
@@ -161,7 +175,8 @@ sheaf task new|ls|show|status|done|handoff
 sheaf send | inbox
 sheaf queue | show | approve | deny | answer
 sheaf pair | device ls|revoke
-sheaf resume [--tmux] | log [--follow]
+sheaf log [--follow]
+sheaf start AGENT | resume [--tmux] | tmux-status
 sheaf run -- CMD | mcp | hook claude-code
 ```
 

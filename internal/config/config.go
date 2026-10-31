@@ -5,6 +5,7 @@
 //	sheaf.db      SQLite event log and state
 //	sheaf.sock    the daemon's Unix socket
 //	owner.token   the human owner's token (mode 0600)
+//	agents/       each agent's token, so Sheaf can launch it (mode 0600)
 //	worktrees/    one git worktree per task
 package config
 
@@ -12,6 +13,7 @@ import (
 	"crypto/rand"
 	"encoding/base32"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,6 +74,38 @@ func (p Paths) LoadOrCreateOwnerToken() (string, error) {
 		return "", err
 	}
 	return tok, nil
+}
+
+// AgentTokenPath is where an agent's token is kept.
+func (p Paths) AgentTokenPath(name string) string {
+	return filepath.Join(p.Home, "agents", name+".token")
+}
+
+// SaveAgentToken stores an agent's token, readable only by this user.
+func (p Paths) SaveAgentToken(name, token string) error {
+	dir := filepath.Join(p.Home, "agents")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(p.AgentTokenPath(name), []byte(token+"\n"), 0o600)
+}
+
+// LoadAgentToken reads a token saved by SaveAgentToken.
+func (p Paths) LoadAgentToken(name string) (string, error) {
+	b, err := os.ReadFile(p.AgentTokenPath(name))
+	if errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("no saved token for agent %q; run `sheaf agent token %s` to issue one", name, name)
+	}
+	return strings.TrimSpace(string(b)), err
+}
+
+// RemoveAgentToken deletes a saved token, if any.
+func (p Paths) RemoveAgentToken(name string) error {
+	err := os.Remove(p.AgentTokenPath(name))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 // NewToken returns a random 160-bit token with the given prefix.
