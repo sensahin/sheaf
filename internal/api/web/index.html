@@ -29,6 +29,7 @@
 <nav class="tabs" id="tabs" hidden>
   <button data-tab="queue" class="on">Needs you <span id="qcount" class="count" hidden></span></button>
   <button data-tab="agents">Agents</button>
+  <button data-tab="tasks">Tasks</button>
   <button data-tab="inbox">Inbox <span id="icount" class="count" hidden></span></button>
 </nav>
 
@@ -51,7 +52,22 @@
     <p id="aempty" class="empty" hidden>No agents yet. Add one with <code>sheaf agent add</code>.</p>
   </section>
 
+  <section id="tasks" hidden>
+    <label class="filter"><input type="checkbox" id="tactive" checked> Only unfinished tasks</label>
+    <div id="tlist" class="list"></div>
+    <p id="tempty" class="empty" hidden>No tasks. Agents create them with the <code>task_create</code> tool, or you can with <code>sheaf task create</code>.</p>
+  </section>
+
   <section id="inbox" hidden>
+    <form id="compose" class="card compose" hidden>
+      <div class="row">
+        <label for="cto">To</label>
+        <select id="cto"></select>
+      </div>
+      <label><span class="sr">Message</span><textarea id="cbody" rows="2" placeholder="Message an agent"></textarea></label>
+      <div class="actions"><button class="primary" type="submit">Send</button></div>
+      <p class="err" hidden></p>
+    </form>
     <div id="mlist" class="list"></div>
     <p id="mempty" class="empty" hidden>No messages from your agents.</p>
   </section>
@@ -61,7 +77,7 @@
   <article class="card approval">
     <div class="meta"><span class="kind"></span><span class="who"></span><span class="age"></span></div>
     <h2 class="summary"></h2>
-    <details class="detail-wrap" hidden><summary>Details</summary><pre class="detail"></pre></details>
+    <details class="detail-wrap" hidden><summary>Details</summary><pre class="detail"></pre><div class="files"></div></details>
     <label class="note-label"><span class="sr">Note for the agent</span><textarea class="note" rows="2" placeholder="Note for the agent (optional)"></textarea></label>
     <div class="actions">
       <button class="approve primary">Approve</button>
@@ -77,6 +93,20 @@
     <div class="row"><span class="dot"></span><h2 class="name"></h2><span class="kind"></span></div>
     <p class="note"></p>
     <ul class="tasks"></ul>
+  </article>
+</template>
+
+<template id="tpl-task">
+  <article class="card task">
+    <div class="meta"><span class="kind status"></span><span class="who"></span><span class="age"></span></div>
+    <h2 class="title"></h2>
+    <dl class="facts"></dl>
+    <div class="actions small">
+      <button class="done">Mark done</button>
+      <button class="cancel">Cancel</button>
+      <button class="reopen" hidden>Reopen</button>
+    </div>
+    <p class="err" hidden></p>
   </article>
 </template>
 

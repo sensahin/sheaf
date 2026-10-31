@@ -69,6 +69,17 @@ out the status sequences (split reads, BEL or ST terminators, and a size cap
 on the body). Reports go to the daemon in the background, latest wins, so a
 slow or stopped daemon never stalls the agent's terminal.
 
+**The desktop app is the web queue in a native window.** `sheaf-desktop`
+uses Wails, which wraps the system webview (WebKit on macOS and Linux,
+WebView2 on Windows), so the app is a few megabytes and shares every line of
+UI with the phone page. It serves the page from inside the app rather than
+on a port, and forwards `/v1` to the daemon's socket without adding
+credentials: the page uses a device token the app gets by pairing itself with
+the owner token. The parts that need no native code (starting the daemon,
+pairing, the proxy, notifications from the event log) live in
+`internal/desktop` and are tested with the rest; only the window is in the
+separate `desktop/` module, so `go test ./...` never needs cgo.
+
 ## Data model
 
 | Table | Holds |
@@ -114,8 +125,8 @@ many tasks can be resumed when it starts.
    agents' published hook formats) and keep them current as those formats
    change. Every adapter in the integration research is built, and so are
    the terminal adapters and the Homebrew formula.
-2. Native desktop app for the queue and diffs; an optional end-to-end
-   encrypted relay so the web queue works away from home without a VPN.
+2. An optional end-to-end encrypted relay so the web queue works away from
+   home without a VPN. (The desktop app is built.)
 3. Signed macOS app identity for the daemon, so TCC and Local Network
    consent stick.
 4. Optional container isolation per task; network and secret brokering.

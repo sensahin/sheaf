@@ -130,3 +130,68 @@ button:disabled { opacity: 0.5; cursor: default; }
 
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 [hidden] { display: none !important; }
+
+/* ----- diffs, file by file */
+.diffstat { color: var(--muted); font-size: 13px; margin: 6px 0; }
+details.file { border: 1px solid var(--line); border-radius: 8px; margin: 8px 0; overflow: hidden; }
+details.file > summary {
+  display: flex; align-items: center; gap: 10px; padding: 6px 10px; margin: 0;
+  background: var(--bg); color: var(--ink); font-size: 13px;
+}
+details.file .path { flex: 1; overflow-wrap: anywhere; }
+.stat.add { color: var(--signal); }
+.stat.del { color: var(--hold); }
+.diff {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.5;
+  overflow-x: auto; max-height: 70vh; overflow-y: auto; background: var(--surface); tab-size: 4;
+}
+.diff .line { display: grid; grid-template-columns: 4.5ch 4.5ch max-content; min-width: 100%; }
+.diff .ln { color: var(--muted); text-align: right; padding-right: 1ch; user-select: none; opacity: 0.7; }
+.diff .code { white-space: pre; padding: 0 10px 0 4px; }
+.diff .add { background: var(--code-add); }
+.diff .del { background: var(--code-del); }
+.diff .hunk { color: var(--muted); background: var(--bg); }
+
+/* ----- tasks and compose */
+.filter { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); margin: 0 0 12px; }
+.kind.status.working { border-color: var(--signal); color: var(--signal); }
+.kind.status.blocked { border-color: var(--band); }
+.kind.status.done, .kind.status.cancelled { color: var(--muted); }
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 4px 0 0; font-size: 13px; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+.facts:empty { display: none; }
+.actions.small button { flex: none; min-height: 36px; padding: 6px 14px; font-size: 14px; }
+.compose { margin-bottom: 16px; }
+.compose .row { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+select {
+  font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 10px;
+}
+.compose .actions button { flex: none; }
+
+/* ----- wide windows: the desktop app and laptop browsers */
+@media (min-width: 960px) {
+  body {
+    display: grid; grid-template-columns: 220px minmax(0, 1fr);
+    grid-template-rows: auto 1fr; min-height: 100vh;
+  }
+  .top { grid-column: 1 / -1; max-width: none; margin: 0; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+  .tabs {
+    flex-direction: column; gap: 2px; max-width: none; margin: 0; padding: 12px 10px;
+    border-bottom: 0; border-right: 1px solid var(--line); position: static; align-self: stretch;
+  }
+  .tabs button {
+    flex: none; display: flex; justify-content: space-between; align-items: center;
+    text-align: left; padding: 8px 12px; border-bottom: 0; border-radius: 8px;
+  }
+  .tabs button.on { background: var(--surface); border-bottom: 0; box-shadow: inset 3px 0 0 var(--band); }
+  .tabs[hidden] + main { grid-column: 1 / -1; }
+  main { max-width: 1040px; width: 100%; margin: 0; padding: 20px 28px; }
+  .actions button { flex: none; min-width: 120px; }
+}
+ul.untracked { margin: 0; padding: 6px 10px 8px 28px; font-size: 13px; }
+@media (max-width: 480px) {
+  .tabs { padding: 0 8px; }
+  .tabs button { font-size: 15px; padding: 10px 2px; white-space: nowrap; }
+}
