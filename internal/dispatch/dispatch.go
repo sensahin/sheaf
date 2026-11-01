@@ -261,6 +261,28 @@ func (d *Dispatcher) Type(ctx context.Context, agent, task, text string, enter b
 	return d.Svc.Record(ctx, core.Human, "agent.typed", agent, map[string]any{"window": w.Name, "chars": len(text), "enter": enter})
 }
 
+// Keys are the keys the phone can press in an agent's terminal: enough to
+// move through a menu, cancel, or interrupt. tmux names them.
+var Keys = map[string]bool{"Up": true, "Down": true, "Left": true, "Right": true, "Enter": true, "Escape": true, "Tab": true, "BSpace": true, "C-c": true}
+
+// Key presses one of Keys in the agent's terminal.
+func (d *Dispatcher) Key(ctx context.Context, agent, task, key string) error {
+	if !Keys[key] {
+		return fmt.Errorf("%w: unknown key %q", core.ErrInvalid, key)
+	}
+	w, ok, err := d.window(agent, task)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("%w: %w: %s", core.ErrNotFound, ErrNotRunning, agent)
+	}
+	if err := d.Term.Key(w.Target, key); err != nil {
+		return err
+	}
+	return d.Svc.Record(ctx, core.Human, "agent.key", agent, map[string]string{"window": w.Name, "key": key})
+}
+
 // Run follows the event log until ctx ends, starting agents that were handed
 // work and ringing idle agents that have unread messages.
 func (d *Dispatcher) Run(ctx context.Context) error {

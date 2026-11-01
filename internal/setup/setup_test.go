@@ -190,6 +190,7 @@ func TestStatusHooks(t *testing.T) {
 }
 
 func TestPrepareWorktreeGivesTheAgentItsHooksWithoutCommittingThem(t *testing.T) {
+	home := fakeHome(t)
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
@@ -218,6 +219,10 @@ func TestPrepareWorktreeGivesTheAgentItsHooksWithoutCommittingThem(t *testing.T)
 	}
 	if st := git(wt, "status", "--porcelain"); st != "" {
 		t.Fatalf("worktree not clean: %q", st)
+	}
+	// Claude Code will not ask whether to trust the worktree.
+	if p := readJSON(t, filepath.Join(home, ".claude.json"))["projects"].(map[string]any)[wt]; p == nil {
+		t.Fatal("worktree not trusted for Claude Code")
 	}
 	again, err := PrepareWorktree(wt, "claude-code", "/bin/sheaf")
 	if err != nil || len(again) != 0 {

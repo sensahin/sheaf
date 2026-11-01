@@ -30,6 +30,7 @@ type Terminal interface {
 	Open(s launch.Spec) error
 	Capture(target string, lines int) (string, error)
 	Type(target, text string, enter bool) error
+	Key(target, key string) error
 }
 
 // Tmux drives the tmux server of the user the daemon runs as.
@@ -95,4 +96,10 @@ func (Tmux) Type(target, text string, enter bool) error {
 		return err
 	}
 	return nil
+}
+
+// Key presses one named key, such as Up or Escape.
+func (Tmux) Key(target, key string) error {
+	_, err := tmux("send-keys", "-t", target, key)
+	return err
 }

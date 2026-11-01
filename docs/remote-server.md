@@ -238,7 +238,7 @@ task the message is about.
 
 **See what an agent is doing.** Agents → Terminal shows the agent's screen,
 refreshed every two seconds. If it stopped on a question of its own (a
-folder-trust prompt, a confirmation), answer it there: type and Send, or ⏎
+folder-trust prompt, a confirmation), answer it there: move with ↑ ↓ and press ⏎, or type and Send
 for Enter. Over SSH, `tmux attach -t sheaf` shows every agent; detach with
 Ctrl-b d.
 
@@ -259,11 +259,17 @@ systemd starts the daemon again; the agents' tmux sessions are gone. Press
 - **An agent window opens and closes at once**: the command is not on the
   service's `PATH`. Rerun `sheaf service ...` from a shell where `which
   claude codex` works, then `daemon-reload` and restart.
-- **Codex ignores Sheaf's hooks**: Codex runs project hooks only once you
-  trust them. Attach (`tmux attach -t sheaf`) or use the Terminal panel, run
-  `/hooks` in Codex and approve Sheaf's.
-- **Claude asks whether to trust the folder**: answer in the Terminal panel
-  (⏎ accepts). Each task is a new folder under `~/.sheaf/worktrees`.
+- **Folder-trust prompts**: each task is a new folder under
+  `~/.sheaf/worktrees`, so before starting an agent there Sheaf marks the
+  folder trusted in the agent's own settings (Claude Code's `~/.claude.json`,
+  Codex's `~/.codex/config.toml`, Gemini's `trustedFolders.json`, Copilot's
+  `trusted_folders`). If an agent still stops on a prompt, answer it in the
+  Terminal panel: ↓ to move to the choice you want, then ⏎ (the highlighted
+  choice is often the safe "No").
+- **Codex ignores Sheaf's hooks**: Codex runs project hooks only in trusted
+  folders, which Sheaf now sets for each task. If your Codex version also
+  asks you to review new hooks, run `/hooks` in that agent's terminal and
+  approve Sheaf's.
 - **The QR code points at the wrong address**: set `--public-url` (step 7).
 - **Nothing happens when you message an idle agent**: the agent's status
   comes from its hooks; check `sheaf agent ls` shows it `idle`, and that

@@ -40,6 +40,7 @@ type Launcher interface {
 	StartTask(ctx context.Context, id, lead string) (core.StartResult, error)
 	Screen(ctx context.Context, agent, task string, lines int) (core.Screen, error)
 	Type(ctx context.Context, agent, task, text string, enter bool) error
+	Key(ctx context.Context, agent, task, key string) error
 	Running() (map[string][]string, error)
 }
 
@@ -244,6 +245,11 @@ type (
 		Text  string `json:"text"`
 		Enter bool   `json:"enter,omitempty"`
 	}
+	KeyReq struct {
+		Name string `json:"name"`
+		Task string `json:"task,omitempty"`
+		Key  string `json:"key"`
+	}
 	PathReq struct {
 		Path string `json:"path"`
 	}
@@ -311,6 +317,17 @@ func (s *Server) methods() map[string]handler {
 				return nil, err
 			}
 			return OK{true}, d.Type(ctx, r.Name, r.Task, r.Text, r.Enter)
+		}),
+
+		"agent.key": typed(func(ctx context.Context, c core.Caller, r KeyReq) (any, error) {
+			if !c.IsHuman() {
+				return nil, core.ErrForbidden
+			}
+			d, err := s.dispatcher()
+			if err != nil {
+				return nil, err
+			}
+			return OK{true}, d.Key(ctx, r.Name, r.Task, r.Key)
 		}),
 
 		"repo.add": typed(func(ctx context.Context, c core.Caller, r core.RepoSpec) (any, error) {

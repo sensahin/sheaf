@@ -666,7 +666,8 @@ func write(path, content string, mode os.FileMode) error {
 	return os.Chmod(path, mode) // WriteFile keeps an existing file's mode
 }
 
-// PrepareWorktree writes an agent's project config into a task worktree, so
+// PrepareWorktree marks a task worktree as trusted for the agent (see Trust)
+// and writes the agent's project config into it, so
 // an agent started there finds its Sheaf hooks even though the worktree is a
 // fresh checkout without the main checkout's untracked config. Files the
 // repository tracks are left as they are. The files it writes are listed in
@@ -685,6 +686,9 @@ func PrepareWorktree(dir, kind, sheaf string) ([]string, error) {
 		files = append(files, f)
 	}
 	plan.Files = files
+	// Nobody may be at the keyboard to answer the agent's folder-trust
+	// prompt. Failing to mark it is not fatal: the prompt still works.
+	Trust(kind, dir)
 	res, err := Apply(dir, plan)
 	if err != nil {
 		return nil, err
