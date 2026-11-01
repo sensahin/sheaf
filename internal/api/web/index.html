@@ -53,9 +53,27 @@
   </section>
 
   <section id="tasks" hidden>
+    <details id="newtask" class="card newtask">
+      <summary>New task</summary>
+      <form id="tform">
+        <label><span class="sr">Title</span><input id="ttitle" type="text" placeholder="What should be done? e.g. Fix the login redirect loop" required></label>
+        <label><span class="sr">Details</span><textarea id="tdetail" rows="4" placeholder="Details for the agent: steps to reproduce, what done looks like, links"></textarea></label>
+        <div class="row fields">
+          <label>Agent <select id="towner"></select></label>
+          <label>Repository <select id="trepo"></select></label>
+        </div>
+        <div class="row fields">
+          <label class="check"><input type="checkbox" id="twt" checked> Own branch</label>
+          <label class="check"><input type="checkbox" id="tstart" checked> Start now</label>
+        </div>
+        <div class="actions"><button class="primary" type="submit">Create task</button></div>
+        <p class="hint" id="thint" hidden></p>
+        <p class="err" hidden></p>
+      </form>
+    </details>
     <label class="filter"><input type="checkbox" id="tactive" checked> Only unfinished tasks</label>
     <div id="tlist" class="list"></div>
-    <p id="tempty" class="empty" hidden>No tasks. Agents create them with the <code>task_create</code> tool, or you can with <code>sheaf task create</code>.</p>
+    <p id="tempty" class="empty" hidden>No tasks. Create one above, or with <code>sheaf task new</code>.</p>
   </section>
 
   <section id="inbox" hidden>
@@ -90,9 +108,20 @@
 
 <template id="tpl-agent">
   <article class="card agent">
-    <div class="row"><span class="dot"></span><h2 class="name"></h2><span class="kind"></span></div>
+    <div class="row"><span class="dot"></span><h2 class="name"></h2><span class="run" hidden>running</span><span class="kind"></span></div>
     <p class="note"></p>
     <ul class="tasks"></ul>
+    <details class="term" hidden>
+      <summary>Terminal</summary>
+      <pre class="screen"></pre>
+      <form class="type">
+        <label><span class="sr">Type into the terminal</span><input type="text" placeholder="Type into the agent's terminal"></label>
+        <button class="primary" type="submit">Send</button>
+        <button class="enter" type="button" title="Press Enter">⏎</button>
+      </form>
+      <p class="hint">For answering a prompt the agent stopped on. For instructions, use a task or a message.</p>
+      <p class="err" hidden></p>
+    </details>
   </article>
 </template>
 
@@ -100,8 +129,10 @@
   <article class="card task">
     <div class="meta"><span class="kind status"></span><span class="who"></span><span class="age"></span></div>
     <h2 class="title"></h2>
+    <p class="detail-text"></p>
     <dl class="facts"></dl>
     <div class="actions small">
+      <button class="start primary">Start agent</button>
       <button class="done">Mark done</button>
       <button class="cancel">Cancel</button>
       <button class="reopen" hidden>Reopen</button>

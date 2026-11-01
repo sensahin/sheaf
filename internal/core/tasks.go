@@ -28,6 +28,7 @@ var validTaskStatus = map[string]bool{TaskOpen: true, TaskWorking: true, TaskBlo
 type Task struct {
 	ID        string    `json:"id"`
 	Title     string    `json:"title"`
+	Detail    string    `json:"detail,omitempty"`
 	Owner     string    `json:"owner,omitempty"`
 	Parent    string    `json:"parent,omitempty"`
 	Status    string    `json:"status"`
@@ -41,7 +42,10 @@ type Task struct {
 
 // TaskSpec describes a task to create.
 type TaskSpec struct {
-	Title  string `json:"title"`
+	Title string `json:"title"`
+	// Detail is the full description: steps to reproduce, acceptance
+	// criteria, links. The agent reads it as its prompt.
+	Detail string `json:"detail,omitempty"`
 	Owner  string `json:"owner,omitempty"`
 	Parent string `json:"parent,omitempty"`
 	// Repo is a path inside a git repository. With Worktree set, the task gets
@@ -69,13 +73,22 @@ func (s *Service) CreateTask(ctx context.Context, c Caller, spec TaskSpec) (Task
 			return Task{}, err
 		}
 	}
-	t := Task{ID: newID("t-"), Title: spec.Title, Owner: spec.Owner, Parent: spec.Parent, Status: TaskOpen}
+	t := Task{ID: newID("t-"), Title: spec.Title, Detail: spec.Detail, Owner: spec.Owner, Parent: spec.Parent, Status: TaskOpen}
 	if spec.Repo != "" {
 		root, err := worktree.Root(spec.Repo)
 		if err != nil {
 			return Task{}, invalidf("repo: %v", err)
 		}
 		t.Repo = root
+		// A paired phone may only use repositories you registered, so a lost
+		// device cannot point agents at the rest of your disk.
+		if c.Device != "" {
+			if ok, err := s.repoKnown(ctx, root); err != nil {
+				return Task{}, err
+			} else if !ok {
+				return Task{}, forbiddenf("repository %s is not registered; run `sheaf repo add %s` on the server", root, root)
+			}
+		}
 	}
 	if spec.Worktree {
 		if t.Repo == "" {
@@ -91,10 +104,16 @@ func (s *Service) CreateTask(ctx context.Context, c Caller, spec TaskSpec) (Task
 	}
 	now := s.now()
 	err := s.tx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.Exec(`INSERT INTO tasks (id, title, owner, parent, status, repo, worktree, branch, base, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			t.ID, t.Title, t.Owner, t.Parent, t.Status, t.Repo, t.Worktree, t.Branch, t.Base, now, now); err != nil {
+		if _, err := tx.Exec(`INSERT INTO tasks (id, title, detail, owner, parent, status, repo, worktree, branch, base, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			t.ID, t.Title, t.Detail, t.Owner, t.Parent, t.Status, t.Repo, t.Worktree, t.Branch, t.Base, now, now); err != nil {
 			return err
+		}
+		if t.Repo != "" {
+			// Every repository a task used is offered for the next one.
+			if _, err := tx.Exec(`INSERT OR IGNORE INTO repos (path, name, created_at) VALUES (?, '', ?)`, t.Repo, now); err != nil {
+				return err
+			}
 		}
 		return s.emit(tx, c.Name, "task.created", t.ID, map[string]string{
 			"title": t.Title, "owner": t.Owner, "parent": t.Parent, "worktree": t.Worktree, "branch": t.Branch,
@@ -205,12 +224,12 @@ func (s *Service) Handoff(ctx context.Context, c Caller, h HandoffRequest) (Mess
 	return m, err
 }
 
-const taskCols = `id, title, owner, parent, status, repo, worktree, branch, base, created_at, updated_at`
+const taskCols = `id, title, detail, owner, parent, status, repo, worktree, branch, base, created_at, updated_at`
 
 func scanTask(r scanner) (Task, error) {
 	var t Task
 	var created, updated string
-	if err := r.Scan(&t.ID, &t.Title, &t.Owner, &t.Parent, &t.Status, &t.Repo, &t.Worktree, &t.Branch, &t.Base, &created, &updated); err != nil {
+	if err := r.Scan(&t.ID, &t.Title, &t.Detail, &t.Owner, &t.Parent, &t.Status, &t.Repo, &t.Worktree, &t.Branch, &t.Base, &created, &updated); err != nil {
 		return Task{}, err
 	}
 	t.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)

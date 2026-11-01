@@ -27,10 +27,13 @@ var nameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 
 // Agent is a registered agent: a stalk in the sheaf.
 type Agent struct {
-	Name      string    `json:"name"`
-	Kind      string    `json:"kind,omitempty"`
-	Policy    Policy    `json:"policy"`
-	ResumeCmd string    `json:"resume_cmd,omitempty"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind,omitempty"`
+	Policy    Policy `json:"policy"`
+	ResumeCmd string `json:"resume_cmd,omitempty"`
+	// StartCmd is what Sheaf runs to start the agent on a task. Empty means
+	// the default for its kind (claude, codex, ...).
+	StartCmd  string    `json:"start_cmd,omitempty"`
 	State     string    `json:"state"`
 	Note      string    `json:"note,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
@@ -44,8 +47,12 @@ type AgentSpec struct {
 	Kind string `json:"kind,omitempty"`
 	// ResumeCmd restarts the agent where it left off, run in its task's
 	// worktree after a reboot (for example "claude --continue").
-	ResumeCmd string  `json:"resume_cmd,omitempty"`
-	Policy    *Policy `json:"policy,omitempty"`
+	ResumeCmd string `json:"resume_cmd,omitempty"`
+	// StartCmd starts the agent on a new task, for example
+	// "codex --ask-for-approval never --sandbox workspace-write". Empty means
+	// the default command for its kind.
+	StartCmd string  `json:"start_cmd,omitempty"`
+	Policy   *Policy `json:"policy,omitempty"`
 }
 
 // AddAgent registers an agent and returns its token. The token is shown once;
@@ -76,8 +83,8 @@ func (s *Service) AddAgent(ctx context.Context, c Caller, spec AgentSpec) (Agent
 		if exists > 0 {
 			return invalidf("agent %q already exists", spec.Name)
 		}
-		if _, err := tx.Exec(`INSERT INTO agents (name, kind, token_hash, policy, resume_cmd, state, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, spec.Name, spec.Kind, hashToken(token), pj, spec.ResumeCmd, StateIdle, now, now); err != nil {
+		if _, err := tx.Exec(`INSERT INTO agents (name, kind, token_hash, policy, resume_cmd, start_cmd, state, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, spec.Name, spec.Kind, hashToken(token), pj, spec.ResumeCmd, spec.StartCmd, StateIdle, now, now); err != nil {
 			return err
 		}
 		return s.emit(tx, c.Name, "agent.added", spec.Name, map[string]string{"kind": spec.Kind})
@@ -87,6 +94,41 @@ func (s *Service) AddAgent(ctx context.Context, c Caller, spec AgentSpec) (Agent
 	}
 	a, err := s.getAgent(ctx, s.db, spec.Name)
 	return a, token, err
+}
+
+// AgentUpdate changes how an agent is started. Nil fields stay as they are.
+type AgentUpdate struct {
+	Name      string  `json:"name"`
+	StartCmd  *string `json:"start_cmd,omitempty"`
+	ResumeCmd *string `json:"resume_cmd,omitempty"`
+}
+
+// UpdateAgent changes an agent's start or resume command. Only the owner
+// token may, since these are commands Sheaf runs.
+func (s *Service) UpdateAgent(ctx context.Context, c Caller, u AgentUpdate) (Agent, error) {
+	if err := requireOwnerToken(c); err != nil {
+		return Agent{}, err
+	}
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		a, err := s.getAgent(ctx, tx, u.Name)
+		if err != nil {
+			return err
+		}
+		if u.StartCmd != nil {
+			a.StartCmd = *u.StartCmd
+		}
+		if u.ResumeCmd != nil {
+			a.ResumeCmd = *u.ResumeCmd
+		}
+		if _, err := tx.Exec(`UPDATE agents SET start_cmd = ?, resume_cmd = ?, updated_at = ? WHERE name = ?`, a.StartCmd, a.ResumeCmd, s.now(), a.Name); err != nil {
+			return err
+		}
+		return s.emit(tx, c.Name, "agent.updated", a.Name, map[string]string{"start_cmd": a.StartCmd, "resume_cmd": a.ResumeCmd})
+	})
+	if err != nil {
+		return Agent{}, err
+	}
+	return s.getAgent(ctx, s.db, u.Name)
 }
 
 // RotateToken issues a new token for an agent, revoking the old one.
@@ -189,7 +231,7 @@ func (s *Service) ReportStatus(ctx context.Context, c Caller, r StatusReport) er
 	})
 }
 
-const agentCols = `name, kind, policy, resume_cmd, state, note, created_at, updated_at`
+const agentCols = `name, kind, policy, resume_cmd, start_cmd, state, note, created_at, updated_at`
 
 type scanner interface{ Scan(...any) error }
 
@@ -200,7 +242,7 @@ type querier interface {
 func scanAgent(r scanner) (Agent, error) {
 	var a Agent
 	var policy, created, updated string
-	if err := r.Scan(&a.Name, &a.Kind, &policy, &a.ResumeCmd, &a.State, &a.Note, &created, &updated); err != nil {
+	if err := r.Scan(&a.Name, &a.Kind, &policy, &a.ResumeCmd, &a.StartCmd, &a.State, &a.Note, &created, &updated); err != nil {
 		return Agent{}, err
 	}
 	if err := json.Unmarshal([]byte(policy), &a.Policy); err != nil {

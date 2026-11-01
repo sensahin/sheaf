@@ -108,6 +108,17 @@ CREATE TABLE devices (
 	revoked_at TEXT
 );
 `,
+	`
+ALTER TABLE tasks ADD COLUMN detail TEXT NOT NULL DEFAULT '';
+ALTER TABLE agents ADD COLUMN start_cmd TEXT NOT NULL DEFAULT '';
+CREATE TABLE repos (
+	path       TEXT PRIMARY KEY,
+	name       TEXT NOT NULL,
+	created_at TEXT NOT NULL
+);
+INSERT OR IGNORE INTO repos (path, name, created_at)
+	SELECT repo, '', MIN(created_at) FROM tasks WHERE repo != '' GROUP BY repo;
+`,
 }
 
 func migrate(db *sql.DB) error {

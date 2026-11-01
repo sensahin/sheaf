@@ -170,6 +170,34 @@ select {
 }
 .compose .actions button { flex: none; }
 
+/* ----- new task, terminals */
+input[type=text] {
+  width: 100%; font: inherit; color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 8px 0 0;
+}
+input[type=text]:focus { outline: 2px solid var(--band); outline-offset: 1px; }
+.newtask { margin-bottom: 16px; }
+.newtask > summary { color: var(--ink); font-weight: 600; font-size: 16px; }
+.row.fields { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 10px; font-size: 14px; color: var(--muted); align-items: center; }
+.row.fields label { display: flex; align-items: center; gap: 6px; }
+.row.fields select { max-width: 60vw; }
+.check input { width: 18px; height: 18px; accent-color: var(--band); }
+.hint { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+.detail-text { white-space: pre-wrap; color: var(--muted); font-size: 14px; margin: 0 0 6px; max-height: 8.5em; overflow: hidden; }
+.detail-text:empty { display: none; }
+.run { font-size: 12px; color: var(--signal); border: 1px solid var(--signal); border-radius: 6px; padding: 0 6px; }
+.term { margin-top: 10px; }
+select.win { margin-top: 8px; font-size: 13px; }
+pre.screen {
+  background: #0F1513; color: #E8ECE6; border-radius: 8px; padding: 10px; margin: 8px 0;
+  font-size: 12px; line-height: 1.35; white-space: pre; overflow: auto; max-height: 60vh;
+}
+form.type { display: flex; gap: 8px; align-items: center; }
+form.type label { flex: 1; }
+form.type input { margin: 0; }
+form.type button { font: inherit; font-weight: 600; border-radius: 8px; padding: 8px 14px; min-height: 40px; cursor: pointer; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+form.type button.primary { background: var(--band); color: var(--band-ink); border-color: var(--band); }
+
 /* ----- wide windows: the desktop app and laptop browsers */
 @media (min-width: 960px) {
   body {
