@@ -59,8 +59,15 @@ func (s *Service) RemoveRepo(ctx context.Context, c Caller, path string) error {
 	if err := requireOwnerToken(c); err != nil {
 		return err
 	}
-	if abs, err := filepath.Abs(path); err == nil {
+	// Stored paths are git's top level, with symlinks resolved (on macOS,
+	// /var is /private/var); resolve the same way, even for a deleted repo.
+	if root, err := worktree.Root(path); err == nil {
+		path = root
+	} else if abs, err := filepath.Abs(path); err == nil {
 		path = abs
+		if real, err := filepath.EvalSymlinks(abs); err == nil {
+			path = real
+		}
 	}
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.Exec(`DELETE FROM repos WHERE path = ?`, path)
