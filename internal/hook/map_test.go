@@ -1,8 +1,10 @@
 package hook
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/sensahin/sheaf/internal/core"
@@ -80,5 +82,12 @@ func TestCallMapping(t *testing.T) {
 		if !tc.ok || tc.got.Action != tc.action || !reflect.DeepEqual(tc.got.Targets, tc.targets) {
 			t.Errorf("%s: got %+v (ok=%v)", tc.name, tc.got, tc.ok)
 		}
+	}
+}
+
+func TestClaudeAllowsSheafTools(t *testing.T) {
+	out, err := ClaudeCode(context.Background(), nil, strings.NewReader(`{"tool_name":"mcp__sheaf__inbox","tool_input":{}}`), 0)
+	if err != nil || !strings.Contains(string(out), `"permissionDecision":"allow"`) {
+		t.Fatalf("%s %v", out, err)
 	}
 }

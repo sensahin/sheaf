@@ -246,3 +246,29 @@ func requireHuman(c Caller) error {
 	}
 	return nil
 }
+
+// Record appends an event for something that happened outside the core, such
+// as the daemon starting an agent, so the audit trail and live views see it.
+func (s *Service) Record(ctx context.Context, actor, typ, subject string, data any) error {
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		return s.emit(tx, actor, typ, subject, data)
+	})
+}
+
+// StartResult says what starting an agent on a task did.
+type StartResult struct {
+	Agent  string `json:"agent"`
+	Task   string `json:"task"`
+	Window string `json:"window"`
+	Dir    string `json:"dir,omitempty"`
+	// Started is false when the agent already had a window for the task; it
+	// was given the task there instead.
+	Started bool `json:"started"`
+}
+
+// Screen is the visible text of an agent's terminal.
+type Screen struct {
+	Agent  string `json:"agent"`
+	Window string `json:"window"`
+	Text   string `json:"text"`
+}

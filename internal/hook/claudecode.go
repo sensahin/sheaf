@@ -98,6 +98,12 @@ func ClaudeCode(ctx context.Context, client *api.Client, r io.Reader, wait time.
 	if err := json.NewDecoder(r).Decode(&in); err != nil {
 		return nil, fmt.Errorf("reading hook input: %w", err)
 	}
+	if isSheafTool(in.ToolName) {
+		// Sheaf's own tools are checked by the daemon. Allowing them here
+		// means an agent nobody is watching never stops on a prompt to use
+		// its inbox.
+		return preToolUse("allow", "Sheaf's own tool; the daemon checks it"), nil
+	}
 	call, ok := claudeCall(in)
 	if !ok {
 		return nil, nil

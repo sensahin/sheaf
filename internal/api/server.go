@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -27,6 +28,28 @@ type Server struct {
 	// WebURL is where the web queue is served, if it is. Pairing links point
 	// here.
 	WebURL string
+
+	// Dispatch starts agents and shows their terminals. Nil when the daemon
+	// cannot (no tmux), and the methods that need it say so.
+	Dispatch Launcher
+}
+
+// Launcher starts agents and reaches their terminals; the daemon's is
+// dispatch.Dispatcher.
+type Launcher interface {
+	StartTask(ctx context.Context, id, lead string) (core.StartResult, error)
+	Screen(ctx context.Context, agent, task string, lines int) (core.Screen, error)
+	Type(ctx context.Context, agent, task, text string, enter bool) error
+	Running() (map[string][]string, error)
+}
+
+var errNoDispatch = fmt.Errorf("%w: this daemon cannot start agents: install tmux on the machine running `sheaf daemon` and restart it", core.ErrInvalid)
+
+func (s *Server) dispatcher() (Launcher, error) {
+	if s.Dispatch == nil {
+		return nil, errNoDispatch
+	}
+	return s.Dispatch, nil
 }
 
 type handler func(ctx context.Context, c core.Caller, body json.RawMessage) (any, error)
@@ -196,6 +219,34 @@ type (
 	OK struct {
 		OK bool `json:"ok"`
 	}
+	// TaskCreateReq creates a task and, with Start, starts its owner on it.
+	TaskCreateReq struct {
+		core.TaskSpec
+		Start bool `json:"start,omitempty"`
+	}
+	TaskCreateResp struct {
+		core.Task
+		Started    *core.StartResult `json:"started,omitempty"`
+		StartError string            `json:"start_error,omitempty"`
+	}
+	TaskStartReq struct {
+		ID   string `json:"id"`
+		Note string `json:"note,omitempty"`
+	}
+	ScreenReq struct {
+		Name  string `json:"name"`
+		Task  string `json:"task,omitempty"`
+		Lines int    `json:"lines,omitempty"`
+	}
+	TypeReq struct {
+		Name  string `json:"name"`
+		Task  string `json:"task,omitempty"`
+		Text  string `json:"text"`
+		Enter bool   `json:"enter,omitempty"`
+	}
+	PathReq struct {
+		Path string `json:"path"`
+	}
 )
 
 // maxWait caps long polls so a client cannot pin a connection forever.
@@ -232,12 +283,84 @@ func (s *Server) methods() map[string]handler {
 		"agent.set_policy": typed(func(ctx context.Context, c core.Caller, r PolicyReq) (any, error) {
 			return OK{true}, svc.SetPolicy(ctx, c, r.Name, r.Policy)
 		}),
+		"agent.update": typed(func(ctx context.Context, c core.Caller, r core.AgentUpdate) (any, error) {
+			return svc.UpdateAgent(ctx, c, r)
+		}),
+		"agent.running": func(ctx context.Context, c core.Caller, _ json.RawMessage) (any, error) {
+			if s.Dispatch == nil {
+				return map[string][]string{}, nil
+			}
+			return s.Dispatch.Running()
+		},
+		"agent.screen": typed(func(ctx context.Context, c core.Caller, r ScreenReq) (any, error) {
+			if !c.IsHuman() {
+				return nil, core.ErrForbidden
+			}
+			d, err := s.dispatcher()
+			if err != nil {
+				return nil, err
+			}
+			return d.Screen(ctx, r.Name, r.Task, r.Lines)
+		}),
+		"agent.type": typed(func(ctx context.Context, c core.Caller, r TypeReq) (any, error) {
+			if !c.IsHuman() {
+				return nil, core.ErrForbidden
+			}
+			d, err := s.dispatcher()
+			if err != nil {
+				return nil, err
+			}
+			return OK{true}, d.Type(ctx, r.Name, r.Task, r.Text, r.Enter)
+		}),
+
+		"repo.add": typed(func(ctx context.Context, c core.Caller, r core.RepoSpec) (any, error) {
+			return svc.AddRepo(ctx, c, r)
+		}),
+		"repo.list": func(ctx context.Context, c core.Caller, _ json.RawMessage) (any, error) {
+			if !c.IsHuman() {
+				return nil, core.ErrForbidden
+			}
+			return svc.ListRepos(ctx)
+		},
+		"repo.remove": typed(func(ctx context.Context, c core.Caller, r PathReq) (any, error) {
+			return OK{true}, svc.RemoveRepo(ctx, c, r.Path)
+		}),
+
 		"agent.report_status": typed(func(ctx context.Context, c core.Caller, r core.StatusReport) (any, error) {
 			return OK{true}, svc.ReportStatus(ctx, c, r)
 		}),
 
-		"task.create": typed(func(ctx context.Context, c core.Caller, r core.TaskSpec) (any, error) {
-			return svc.CreateTask(ctx, c, r)
+		"task.create": typed(func(ctx context.Context, c core.Caller, r TaskCreateReq) (any, error) {
+			t, err := svc.CreateTask(ctx, c, r.TaskSpec)
+			if err != nil || !r.Start {
+				return TaskCreateResp{Task: t}, err
+			}
+			if !c.IsHuman() {
+				return nil, core.ErrForbidden
+			}
+			// The task exists either way; a failed start is reported, not
+			// fatal, so the caller can fix the agent and press Start again.
+			resp := TaskCreateResp{Task: t}
+			d, err := s.dispatcher()
+			if err == nil {
+				var res core.StartResult
+				res, err = d.StartTask(ctx, t.ID, "")
+				resp.Started = &res
+			}
+			if err != nil {
+				resp.Started, resp.StartError = nil, err.Error()
+			}
+			return resp, nil
+		}),
+		"task.start": typed(func(ctx context.Context, c core.Caller, r TaskStartReq) (any, error) {
+			if !c.IsHuman() {
+				return nil, core.ErrForbidden
+			}
+			d, err := s.dispatcher()
+			if err != nil {
+				return nil, err
+			}
+			return d.StartTask(ctx, r.ID, r.Note)
 		}),
 		"task.list": typed(func(ctx context.Context, c core.Caller, r core.TaskFilter) (any, error) {
 			return svc.ListTasks(ctx, r)

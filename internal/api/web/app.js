@@ -245,12 +245,28 @@ function renderQueue(items) {
 
 // ----- agents
 
+let running = {}; // agent name -> its tmux window names
+const openTerms = new Set(); // agents whose terminal is expanded
+const typed = new Map(); // agent name -> text being typed
+const termWindow = new Map(); // agent name -> the window shown, when it has several
+
+// The task of the window shown for an agent, if it has several.
+function termTask(name) {
+  const w = termWindow.get(name) || "";
+  return w.includes(":") ? w.slice(w.indexOf(":") + 1) : undefined;
+}
+let agentsKey = "";
+
 function renderAgents(agents, tasks) {
+  const key = JSON.stringify([agents.map((a) => [a.name, a.state, a.note]), tasks.map((t) => [t.id, t.owner, t.status, t.title]), running]);
+  if (key === agentsKey) return;
+  agentsKey = key;
   const list = $("alist");
   list.textContent = "";
   $("aempty").hidden = agents.length > 0;
   for (const a of agents) {
     const card = clone("tpl-agent");
+    card.dataset.name = a.name;
     card.querySelector(".dot").classList.add(a.state);
     card.querySelector(".dot").title = a.state;
     card.querySelector(".name").textContent = a.name;
@@ -266,8 +282,73 @@ function renderAgents(agents, tasks) {
       li.append(id, title);
       ul.appendChild(li);
     }
+    const isRunning = (running[a.name] || []).length > 0;
+    card.querySelector(".run").hidden = !isRunning;
+    const term = card.querySelector(".term");
+    term.hidden = !isRunning;
+    if (isRunning) wireTerminal(card, a.name, term);
     list.appendChild(card);
   }
+}
+
+function wireTerminal(card, name, term) {
+  const wins = running[name] || [];
+  if (!wins.includes(termWindow.get(name))) termWindow.delete(name);
+  if (wins.length > 1) {
+    const sel = el("select", "win");
+    for (const w of wins) sel.appendChild(el("option", "", w)).value = w;
+    sel.value = termWindow.get(name) || wins[0];
+    termWindow.set(name, sel.value);
+    sel.addEventListener("change", () => { termWindow.set(name, sel.value); loadScreen(name); });
+    term.querySelector(".screen").before(sel);
+  }
+  const input = term.querySelector("input");
+  input.value = typed.get(name) || "";
+  input.addEventListener("input", () => typed.set(name, input.value));
+  term.open = openTerms.has(name);
+  term.addEventListener("toggle", () => {
+    if (term.open) { openTerms.add(name); pollScreen(name); } else openTerms.delete(name);
+  });
+  const send = async (text, enter) => {
+    term.querySelector(".err").hidden = true;
+    try {
+      await call("agent.type", { name, task: termTask(name), text, enter });
+      if (text) { input.value = ""; typed.delete(name); }
+      setTimeout(() => loadScreen(name), 600);
+    } catch (err) {
+      showError(term, err);
+    }
+  };
+  term.querySelector("form").addEventListener("submit", (e) => { e.preventDefault(); send(input.value, true); });
+  term.querySelector(".enter").addEventListener("click", () => send("", true));
+  if (term.open) loadScreen(name);
+}
+
+async function loadScreen(name) {
+  const pre = document.querySelector(`#alist .card[data-name="${CSS.escape(name)}"] .screen`);
+  if (!pre) return;
+  try {
+    const s = await call("agent.screen", { name, task: termTask(name), lines: 80 });
+    const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24;
+    if (pre.textContent !== s.text) {
+      pre.textContent = s.text;
+      if (atBottom || !pre.dataset.seen) pre.scrollTop = pre.scrollHeight;
+      pre.dataset.seen = "1";
+    }
+  } catch (err) {
+    pre.textContent = err.message;
+  }
+}
+
+const polling = new Set();
+async function pollScreen(name) {
+  if (polling.has(name)) return;
+  polling.add(name);
+  while (openTerms.has(name) && tab === "agents" && !document.hidden) {
+    await loadScreen(name);
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  polling.delete(name);
 }
 
 // ----- tasks
@@ -277,7 +358,7 @@ let tasksKey = "";
 function renderTasks() {
   const activeOnly = $("tactive").checked;
   const items = allTasks.filter((t) => !activeOnly || ["open", "working", "blocked"].includes(t.status));
-  const key = activeOnly + ":" + items.map((t) => t.id + t.status + t.owner + t.updated_at).join(",");
+  const key = activeOnly + ":" + items.map((t) => t.id + t.status + t.owner + t.updated_at).join(",") + JSON.stringify(running);
   if (key === tasksKey) return;
   tasksKey = key;
   const list = $("tlist");
@@ -291,6 +372,7 @@ function renderTasks() {
     card.querySelector(".who").textContent = (t.owner || "unassigned") + " · " + t.id;
     card.querySelector(".age").textContent = ago(t.updated_at);
     card.querySelector(".title").textContent = t.title;
+    card.querySelector(".detail-text").textContent = t.detail || "";
     const dl = card.querySelector(".facts");
     for (const [k, v] of [["Branch", t.branch], ["Worktree", t.worktree], ["Repo", t.repo], ["Parent", t.parent]]) {
       if (!v) continue;
@@ -298,6 +380,21 @@ function renderTasks() {
       dl.lastChild.appendChild(el("code", "", v));
     }
     const finished = t.status === "done" || t.status === "cancelled";
+    const start = card.querySelector(".start");
+    start.hidden = finished || !t.owner;
+    if ((running[t.owner] || []).includes(t.owner + ":" + t.id)) start.textContent = "Running";
+    start.disabled = start.textContent === "Running";
+    start.addEventListener("click", async () => {
+      start.disabled = true;
+      try {
+        await call("task.start", { id: t.id });
+        tasksKey = "";
+        refresh();
+      } catch (err) {
+        start.disabled = false;
+        showError(card, err);
+      }
+    });
     card.querySelector(".done").hidden = finished;
     card.querySelector(".cancel").hidden = finished;
     card.querySelector(".reopen").hidden = !finished;
@@ -316,6 +413,78 @@ function renderTasks() {
     card.querySelector(".cancel").addEventListener("click", () => move("cancelled"));
     card.querySelector(".reopen").addEventListener("click", () => move("open"));
     list.appendChild(card);
+  }
+}
+
+// ----- new task
+
+let repos = [];
+function renderNewTask(agents) {
+  const owner = $("towner");
+  const names = agents.map((a) => a.name);
+  if ([...owner.options].map((o) => o.value).join() !== ["", ...names].join()) {
+    const keep = owner.value;
+    owner.textContent = "";
+    owner.appendChild(el("option", "", "Nobody yet")).value = "";
+    for (const n of names) owner.appendChild(el("option", "", n)).value = n;
+    owner.value = names.includes(keep) ? keep : (names[0] || "");
+  }
+  const repo = $("trepo");
+  const paths = repos.map((r) => r.path);
+  if ([...repo.options].map((o) => o.value).join() !== ["", ...paths].join()) {
+    const keep = repo.value;
+    repo.textContent = "";
+    repo.appendChild(el("option", "", "None")).value = "";
+    for (const r of repos) {
+      const o = el("option", "", r.name);
+      o.value = r.path;
+      o.title = r.path;
+      repo.appendChild(o);
+    }
+    repo.value = paths.includes(keep) ? keep : (paths[0] || "");
+  }
+  const hint = $("thint");
+  hint.hidden = repos.length > 0;
+  hint.textContent = "No repositories yet. On the server, run `sheaf repo add DIR` to offer one here.";
+  syncNewTask();
+}
+
+function syncNewTask() {
+  const hasRepo = !!$("trepo").value;
+  $("twt").disabled = !hasRepo;
+  if (!hasRepo) $("twt").checked = false;
+  $("tstart").disabled = !$("towner").value;
+  if (!$("towner").value) $("tstart").checked = false;
+}
+
+async function createTask(e) {
+  e.preventDefault();
+  const form = $("tform");
+  const err = form.querySelector(".err");
+  err.hidden = true;
+  const title = $("ttitle").value.trim();
+  if (!title) return;
+  const btn = form.querySelector("button[type=submit]");
+  btn.disabled = true;
+  try {
+    const t = await call("task.create", {
+      title,
+      detail: $("tdetail").value.trim() || undefined,
+      owner: $("towner").value || undefined,
+      repo: $("trepo").value || undefined,
+      worktree: $("twt").checked,
+      start: $("tstart").checked,
+    });
+    $("ttitle").value = "";
+    $("tdetail").value = "";
+    if (t.start_error) showError(form, new Error(`Created ${t.id}, but ${t.owner} did not start: ${t.start_error}`));
+    else $("newtask").open = false;
+    tasksKey = "";
+    refresh();
+  } catch (e2) {
+    showError(form, e2);
+  } finally {
+    btn.disabled = false;
   }
 }
 
@@ -413,8 +582,11 @@ async function refresh() {
     call("agent.list", {}),
     call("task.list", {}),
     call("message.inbox", { all: true, peek: true }),
-  ]).then(([q, a, t, m]) => { messages = m || []; return [q, a || [], t || []]; });
+    call("agent.running", {}).catch(() => ({})),
+    call("repo.list", {}).catch(() => []),
+  ]).then(([q, a, t, m, r, rp]) => { messages = m || []; running = r || {}; repos = rp || []; return [q, a || [], t || []]; });
   allTasks = tasks;
+  renderNewTask(agents);
   renderQueue(queue || []);
   renderAgents(agents, tasks.filter((t) => ["open", "working", "blocked"].includes(t.status)));
   renderTasks();
@@ -457,9 +629,16 @@ function init() {
     b.addEventListener("click", () => {
       showTab(b.dataset.tab);
       if (b.dataset.tab === "inbox") markInboxRead();
+      if (b.dataset.tab === "agents") for (const n of openTerms) pollScreen(n);
     });
   }
   $("tactive").addEventListener("change", renderTasks);
+  $("tform").addEventListener("submit", createTask);
+  $("trepo").addEventListener("change", () => { if ($("trepo").value) $("twt").checked = true; syncNewTask(); });
+  $("towner").addEventListener("change", () => { if ($("towner").value) $("tstart").checked = true; syncNewTask(); });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && tab === "agents") for (const n of openTerms) pollScreen(n);
+  });
   $("compose").addEventListener("submit", sendCompose);
   $("cbody").addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) sendCompose(e);

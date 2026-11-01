@@ -62,6 +62,21 @@ on the event log. Pairing puts the token in the URL fragment, which browsers
 never send to the server; the page moves it to local storage and clears the
 address bar. Bearer tokens rather than cookies mean no CSRF surface.
 
+**Headless dispatch, for servers.** With `--headless`, the daemon follows
+its own event log (`internal/dispatch`). A task created with "start", or a
+handoff or message to an agent that has no tmux window, opens the agent in a
+window of the `sheaf` tmux session, in the task's worktree, with the task as
+its first prompt (on the command line for agents that take one, in its inbox
+for the rest). An agent that has a window and reports idle while it has
+unread messages gets one line typed into its terminal telling it to read its
+inbox; the messages stay on the bus. Each message rings once, and a freshly
+started agent is left alone for 20 seconds. The same package reads a
+window's screen (`tmux capture-pane`) and types into it, so the phone can
+answer a prompt an agent stopped on. These run only the agent's registered
+command, which only the owner token can set; a paired device can start and
+type, but not change what runs. A device may create tasks only in
+repositories registered with `sheaf repo add`.
+
 **`sheaf run` for status.** OSC 7501 travels in the agent's own terminal
 output, so the only place to read it is the pty. `sheaf run` starts the agent
 in a pty, copies every byte through unchanged, and a streaming scanner picks
@@ -85,11 +100,12 @@ separate `desktop/` module, so `go test ./...` never needs cgo.
 | Table | Holds |
 | --- | --- |
 | `events` | Append-only log: `ts`, `actor`, `type`, `subject`, JSON `data` |
-| `agents` | Name, kind, token hash (SHA-256), policy, resume command, state |
-| `tasks` | Title, owner, parent, status, repo, worktree, branch, base commit |
+| `agents` | Name, kind, token hash (SHA-256), policy, start and resume commands, state |
+| `tasks` | Title, detail, owner, parent, status, repo, worktree, branch, base commit |
 | `messages` | Sender, recipient, task, kind (message, question, handoff, decision), body, read time |
 | `approvals` | Agent, task, kind (action, diff, question), summary, detail, status, answer |
 | `devices` | Paired phones and browsers: name, token hash, last seen, revoked time |
+| `repos` | Repositories tasks may use from a paired device |
 
 The daemon stores tokens only as hashes. The CLI keeps the owner token in
 `$SHEAF_HOME/owner.token` and each agent's token in

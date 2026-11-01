@@ -23,6 +23,7 @@ import (
 	"github.com/sensahin/sheaf/internal/cmux"
 	"github.com/sensahin/sheaf/internal/config"
 	"github.com/sensahin/sheaf/internal/core"
+	"github.com/sensahin/sheaf/internal/dispatch"
 	"github.com/sensahin/sheaf/internal/herdr"
 	"github.com/sensahin/sheaf/internal/hook"
 	"github.com/sensahin/sheaf/internal/launch"
@@ -51,12 +52,20 @@ const usage = `sheaf: many agents, one agreement.
 
 Setup
   sheaf init                       create ~/.sheaf and your owner token
-  sheaf daemon [--web ADDR|off]    run the coordination daemon and web queue
-  sheaf agent add NAME [--kind K] [--resume CMD]
+  sheaf daemon [--web ADDR|off] [--public-url URL] [--headless]
+                                   run the coordination daemon and web queue;
+                                   --headless starts and wakes agents itself
+  sheaf service                    print a systemd unit for the daemon (Linux)
+  sheaf agent add NAME [--kind K] [--command CMD] [--resume CMD]
+  sheaf agent set NAME [--command CMD] [--resume CMD]
   sheaf agent ls | rm NAME | token NAME | policy NAME [--set FILE]
+  sheaf repo add DIR [--name N] | ls | rm DIR
+                                   repositories tasks can use from your phone
 
 Work
   sheaf task new TITLE [--owner A] [--parent T] [--repo DIR] [--worktree]
+                [--detail TEXT] [--start]
+  sheaf task start ID              start the task's owner on it (needs tmux)
   sheaf task ls [--all] [--owner A]
   sheaf task status ID STATUS      open, working, blocked, done, cancelled
   sheaf task handoff ID TO NOTE
@@ -128,6 +137,8 @@ func run(args []string) error {
 		return cmdDaemon(ctx, paths, rest)
 	case "setup":
 		return cmdSetup(rest)
+	case "service":
+		return cmdService(paths, rest)
 	}
 
 	c, err := client(paths)
@@ -173,6 +184,8 @@ func run(args []string) error {
 		return cmdPair(ctx, c, rest)
 	case "device":
 		return cmdDevice(ctx, c, rest)
+	case "repo":
+		return cmdRepo(ctx, c, rest)
 	}
 	return fmt.Errorf("unknown command %q (see `sheaf help`)", cmd)
 }
@@ -258,6 +271,8 @@ func cmdInit(ctx context.Context, paths config.Paths) error {
 func cmdDaemon(ctx context.Context, paths config.Paths, args []string) error {
 	fs := flag.NewFlagSet("daemon", flag.ContinueOnError)
 	web := fs.String("web", defaultWeb, `address for the web queue, or "off"; use 0.0.0.0:7517 or a Tailscale address to reach it from your phone`)
+	public := fs.String("public-url", "", "the address your phone opens, when it differs from --web (an HTTPS proxy, `tailscale serve`, an SSH tunnel)")
+	headless := fs.Bool("headless", false, "nobody is at this machine's keyboard: start agents that are handed work, and tell idle agents about new messages")
 	if _, err := parse(fs, args); err != nil {
 		return err
 	}
@@ -296,6 +311,19 @@ func cmdDaemon(ctx context.Context, paths config.Paths, args []string) error {
 		fmt.Fprintf(os.Stderr, "%d item(s) waiting in your queue: run `sheaf queue`\n", len(pending))
 	}
 	srv := api.NewServer(svc)
+	if (dispatch.Tmux{}).Available() {
+		d := &dispatch.Dispatcher{
+			Svc: svc, Paths: paths, Sheaf: self(), Term: dispatch.Tmux{}, Auto: *headless,
+			Logf: func(f string, a ...any) { fmt.Fprintf(os.Stderr, f+"\n", a...) },
+		}
+		srv.Dispatch = d
+		if *headless {
+			go d.Run(ctx)
+			fmt.Fprintln(os.Stderr, "headless: agents handed work are started in tmux session \"sheaf\"; idle agents are told about new messages")
+		}
+	} else if *headless {
+		return errors.New("--headless needs tmux; install it (apt install tmux) and try again")
+	}
 	if *web == "off" {
 		return srv.ListenUnix(ctx, paths.Socket)
 	}
@@ -304,8 +332,11 @@ func cmdDaemon(ctx context.Context, paths config.Paths, args []string) error {
 		return fmt.Errorf("web queue: %w (pass --web off to disable it)", err)
 	}
 	srv.WebURL = webURL(l.Addr().(*net.TCPAddr))
+	if *public != "" {
+		srv.WebURL = strings.TrimRight(*public, "/")
+	}
 	fmt.Fprintf(os.Stderr, "web queue at %s (pair a device with `sheaf pair`)\n", srv.WebURL)
-	if !l.Addr().(*net.TCPAddr).IP.IsLoopback() {
+	if !l.Addr().(*net.TCPAddr).IP.IsLoopback() && !strings.HasPrefix(srv.WebURL, "https://") {
 		fmt.Fprintln(os.Stderr, "warning: the web queue is reachable from your network over plain HTTP; prefer a private network such as Tailscale")
 	}
 	errc := make(chan error, 2)
@@ -572,6 +603,7 @@ func cmdAgent(ctx context.Context, paths config.Paths, c *api.Client, args []str
 	fs := flag.NewFlagSet("agent", flag.ContinueOnError)
 	kind := fs.String("kind", "", "agent program: claude-code, codex, opencode, ...")
 	resume := fs.String("resume", "", "command that resumes the agent, run in its task directory")
+	command := fs.String("command", "", "command that starts the agent on a task (default: the program for its kind)")
 	set := fs.String("set", "", "policy JSON file to apply")
 	pos, err := parse(fs, args[1:])
 	if err != nil {
@@ -584,17 +616,17 @@ func cmdAgent(ctx context.Context, paths config.Paths, c *api.Client, args []str
 			return err
 		}
 		w := table()
-		fmt.Fprintln(w, "AGENT\tKIND\tSTATE\tNOTE\tRESUME")
+		fmt.Fprintln(w, "AGENT\tKIND\tSTATE\tNOTE\tCOMMAND\tRESUME")
 		for _, a := range agents {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", a.Name, a.Kind, a.State, a.Note, a.ResumeCmd)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, a.Kind, a.State, a.Note, a.StartCmd, a.ResumeCmd)
 		}
 		return w.Flush()
 	case "add":
-		if err := need(pos, 1, "agent add NAME [--kind K] [--resume CMD]"); err != nil {
+		if err := need(pos, 1, "agent add NAME [--kind K] [--command CMD] [--resume CMD]"); err != nil {
 			return err
 		}
 		var r api.AddAgentResp
-		if err := c.Call(ctx, "agent.add", core.AgentSpec{Name: pos[0], Kind: *kind, ResumeCmd: *resume}, &r); err != nil {
+		if err := c.Call(ctx, "agent.add", core.AgentSpec{Name: pos[0], Kind: *kind, StartCmd: *command, ResumeCmd: *resume}, &r); err != nil {
 			return err
 		}
 		if err := paths.SaveAgentToken(r.Agent.Name, r.Token); err != nil {
@@ -602,6 +634,23 @@ func cmdAgent(ctx context.Context, paths config.Paths, c *api.Client, args []str
 		}
 		printAgentSetup(paths, r.Agent.Name, r.Agent.Kind, r.Token)
 		return nil
+	case "set":
+		if err := need(pos, 1, "agent set NAME [--command CMD] [--resume CMD]"); err != nil {
+			return err
+		}
+		u := core.AgentUpdate{Name: pos[0]}
+		fs.Visit(func(f *flag.Flag) {
+			switch f.Name {
+			case "command":
+				u.StartCmd = command
+			case "resume":
+				u.ResumeCmd = resume
+			}
+		})
+		if u.StartCmd == nil && u.ResumeCmd == nil {
+			return fmt.Errorf("usage: sheaf agent set NAME [--command CMD] [--resume CMD]")
+		}
+		return c.Call(ctx, "agent.update", u, nil)
 	case "rm", "remove":
 		if err := need(pos, 1, "agent rm NAME"); err != nil {
 			return err
@@ -783,6 +832,8 @@ func cmdTask(ctx context.Context, c *api.Client, args []string) error {
 	repo := fs.String("repo", "", "path in a git repository")
 	wt := fs.Bool("worktree", false, "give the task its own git worktree")
 	all := fs.Bool("all", false, "include finished tasks")
+	detail := fs.String("detail", "", "full description; the agent gets it as its prompt")
+	start := fs.Bool("start", false, "start the owner on the task right away (needs tmux)")
 	pos, err := parse(fs, args[1:])
 	if err != nil {
 		return err
@@ -811,14 +862,31 @@ func cmdTask(ctx context.Context, c *api.Client, args []string) error {
 				*repo = abs
 			}
 		}
-		var t core.Task
-		if err := c.Call(ctx, "task.create", core.TaskSpec{Title: strings.Join(pos, " "), Owner: *owner, Parent: *parent, Repo: *repo, Worktree: *wt}, &t); err != nil {
+		var t api.TaskCreateResp
+		spec := core.TaskSpec{Title: strings.Join(pos, " "), Detail: *detail, Owner: *owner, Parent: *parent, Repo: *repo, Worktree: *wt}
+		if err := c.Call(ctx, "task.create", api.TaskCreateReq{TaskSpec: spec, Start: *start}, &t); err != nil {
 			return err
 		}
 		fmt.Println(t.ID)
 		if t.Worktree != "" {
 			fmt.Printf("worktree %s on branch %s\n", t.Worktree, t.Branch)
 		}
+		if t.Started != nil {
+			printStarted(*t.Started)
+		}
+		if t.StartError != "" {
+			return fmt.Errorf("created %s, but could not start %s: %s", t.ID, t.Owner, t.StartError)
+		}
+		return nil
+	case "start":
+		if err := need(pos, 1, "task start ID"); err != nil {
+			return err
+		}
+		var r core.StartResult
+		if err := c.Call(ctx, "task.start", api.TaskStartReq{ID: pos[0]}, &r); err != nil {
+			return err
+		}
+		printStarted(r)
 		return nil
 	case "show":
 		if err := need(pos, 1, "task show ID"); err != nil {
@@ -847,6 +915,68 @@ func cmdTask(ctx context.Context, c *api.Client, args []string) error {
 		return c.Call(ctx, "task.handoff", core.HandoffRequest{Task: pos[0], To: pos[1], Note: strings.Join(pos[2:], " ")}, nil)
 	}
 	return fmt.Errorf("unknown task command %q", args[0])
+}
+
+func printStarted(r core.StartResult) {
+	if r.Started {
+		fmt.Printf("started %s in tmux window %s (attach with: tmux attach -t %s)\n", r.Agent, r.Window, launch.Session)
+		return
+	}
+	fmt.Printf("%s is already running in window %s; gave it the task there\n", r.Agent, r.Window)
+}
+
+func cmdRepo(ctx context.Context, c *api.Client, args []string) error {
+	if len(args) == 0 {
+		args = []string{"ls"}
+	}
+	fs := flag.NewFlagSet("repo", flag.ContinueOnError)
+	name := fs.String("name", "", "short label shown on your phone")
+	pos, err := parse(fs, args[1:])
+	if err != nil {
+		return err
+	}
+	switch args[0] {
+	case "ls", "list":
+		var repos []core.Repo
+		if err := c.Call(ctx, "repo.list", nil, &repos); err != nil {
+			return err
+		}
+		if len(repos) == 0 {
+			fmt.Println("No repositories yet. Add one with `sheaf repo add DIR`.")
+			return nil
+		}
+		w := table()
+		fmt.Fprintln(w, "NAME\tPATH")
+		for _, r := range repos {
+			fmt.Fprintf(w, "%s\t%s\n", r.Name, r.Path)
+		}
+		return w.Flush()
+	case "add":
+		dir := "."
+		if len(pos) > 0 {
+			dir = pos[0]
+		}
+		abs, err := filepath.Abs(dir)
+		if err != nil {
+			return err
+		}
+		var r core.Repo
+		if err := c.Call(ctx, "repo.add", core.RepoSpec{Path: abs, Name: *name}, &r); err != nil {
+			return err
+		}
+		fmt.Printf("added %s (%s)\n", r.Name, r.Path)
+		return nil
+	case "rm", "remove":
+		if err := need(pos, 1, "repo rm DIR"); err != nil {
+			return err
+		}
+		abs, err := filepath.Abs(pos[0])
+		if err != nil {
+			return err
+		}
+		return c.Call(ctx, "repo.remove", api.PathReq{Path: abs}, nil)
+	}
+	return fmt.Errorf("unknown repo command %q", args[0])
 }
 
 func cmdSend(ctx context.Context, c *api.Client, args []string) error {

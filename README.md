@@ -261,7 +261,8 @@ sheaf pair --name phone             # prints a QR code and a link
 ```
 
 Scan the code and you get the queue, with diffs, approve, deny and answer
-buttons, your agents' status and their messages to you. It updates live and
+buttons, your agents' status and their messages to you. You can also create
+tasks, start an agent on one, and see an agent's terminal. It updates live and
 can be added to the home screen. Each paired device has its own token, so
 `sheaf device revoke ID` cuts off a lost phone without touching anything
 else. A paired device can decide approvals and message agents, but cannot add
@@ -269,6 +270,16 @@ agents, change policies or pair more devices.
 
 The page is plain HTTP. Use it on a private network such as Tailscale, not on
 public Wi-Fi.
+
+## Run it on a server
+
+Sheaf can run on a Linux server (a VPS, a box under your desk) with nobody at
+the keyboard: `sheaf daemon --headless` starts an agent in tmux when you
+create a task from your phone, starts the next agent when one hands a task
+over for review, and tells idle agents about new messages. `sheaf service`
+prints a systemd unit for it, and `--public-url` makes pairing links point at
+your Tailscale or HTTPS address. [docs/remote-server.md](docs/remote-server.md)
+walks through a Hetzner Ubuntu server step by step.
 
 ## Tools agents get
 
@@ -285,9 +296,11 @@ public Wi-Fi.
 ## Commands
 
 ```
-sheaf init | daemon [--web ADDR|off] | status
-sheaf agent add|ls|rm|token|policy
-sheaf task new|ls|show|status|done|handoff
+sheaf init | daemon [--web ADDR|off] [--public-url URL] [--headless] | status
+sheaf service                      (systemd unit for a server)
+sheaf agent add|set|ls|rm|token|policy
+sheaf repo add|ls|rm
+sheaf task new|start|ls|show|status|done|handoff
 sheaf send | inbox
 sheaf queue | show | approve | deny | answer
 sheaf pair | device ls|revoke
