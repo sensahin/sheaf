@@ -321,6 +321,17 @@ function wireTerminal(card, name, term) {
   };
   term.querySelector("form").addEventListener("submit", (e) => { e.preventDefault(); send(input.value, true); });
   term.querySelector(".enter").addEventListener("click", () => send("", true));
+  for (const b of term.querySelectorAll(".keys button")) {
+    b.addEventListener("click", async () => {
+      term.querySelector(".err").hidden = true;
+      try {
+        await call("agent.key", { name, task: termTask(name), key: b.dataset.key });
+        setTimeout(() => loadScreen(name), 400);
+      } catch (err) {
+        showError(term, err);
+      }
+    });
+  }
   if (term.open) loadScreen(name);
 }
 

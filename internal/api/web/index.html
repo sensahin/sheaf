@@ -119,7 +119,14 @@
         <button class="primary" type="submit">Send</button>
         <button class="enter" type="button" title="Press Enter">⏎</button>
       </form>
-      <p class="hint">For answering a prompt the agent stopped on. For instructions, use a task or a message.</p>
+      <div class="keys">
+        <button type="button" data-key="Up" title="Up arrow">↑</button>
+        <button type="button" data-key="Down" title="Down arrow">↓</button>
+        <button type="button" data-key="Tab" title="Tab">Tab</button>
+        <button type="button" data-key="Escape" title="Escape">Esc</button>
+        <button type="button" data-key="C-c" title="Ctrl-C: interrupt">Ctrl-C</button>
+      </div>
+      <p class="hint">For answering a prompt the agent stopped on: move with ↑ ↓, then ⏎. For instructions, use a task or a message.</p>
       <p class="err" hidden></p>
     </details>
   </article>

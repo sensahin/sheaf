@@ -59,6 +59,10 @@ func (f *fakeTerm) Type(target, text string, enter bool) error {
 	return nil
 }
 
+func (f *fakeTerm) Key(target, key string) error {
+	return f.Type(target, "<"+key+">", false)
+}
+
 func (f *fakeTerm) counts() (int, int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -67,6 +71,9 @@ func (f *fakeTerm) counts() (int, int) {
 
 func newDispatcher(t *testing.T) (*Dispatcher, *fakeTerm, string) {
 	t.Helper()
+	t.Setenv("HOME", t.TempDir()) // worktrees get marked trusted in the agents' settings
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("CODEX_HOME", "")
 	dir := t.TempDir()
 	db, err := store.Open(filepath.Join(dir, "sheaf.db"))
 	if err != nil {
@@ -247,6 +254,12 @@ func TestScreenAndType(t *testing.T) {
 	}
 	if err := d.Type(ctx, "codex", "", "1", true); err != nil || term.typed[0] != (typedKeys{"@2", "1", true}) {
 		t.Fatalf("type: %v %+v", err, term.typed)
+	}
+	if err := d.Key(ctx, "claude", "", "Down"); err != nil || term.typed[1].text != "<Down>" {
+		t.Fatalf("key: %v %+v", err, term.typed)
+	}
+	if err := d.Key(ctx, "claude", "", "rm -rf /"); !errors.Is(err, core.ErrInvalid) {
+		t.Fatalf("free text as a key: %v", err)
 	}
 	running, _ := d.Running()
 	if len(running["claude"]) != 1 || len(running["codex"]) != 1 {
