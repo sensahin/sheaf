@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -74,6 +75,11 @@ type (
 	readArgs struct {
 		All  bool `json:"all,omitempty" jsonschema:"include messages already read"`
 		Peek bool `json:"peek,omitempty" jsonschema:"leave unread messages unread"`
+	}
+	terminalArgs struct {
+		Agent string `json:"agent" jsonschema:"the agent"`
+		Text  string `json:"text,omitempty" jsonschema:"text to type, followed by Enter"`
+		Key   string `json:"key,omitempty" jsonschema:"a key to press instead: 1-9 (menu option), Enter, Escape, Up, Down, Tab, C-c"`
 	}
 	screenArgs struct {
 		Agent string `json:"agent" jsonschema:"the agent"`
@@ -213,6 +219,30 @@ func (s *Server) newMCP(c core.Caller) *mcp.Server {
 				a.Lines = 40
 			}
 			return s.Launcher.Screen(ctx, a.Agent, "", a.Lines)
+		})
+	tool(srv, "answer_terminal", "Answer a prompt an agent is stopped on in its own terminal (a permission dialog or menu that agent_screen shows): type text and Enter, or press one key. Only on the user's explicit instruction.", false,
+		func(ctx context.Context, a terminalArgs) (any, error) {
+			if s.Launcher == nil {
+				return nil, errors.New("this server cannot reach terminals (no tmux)")
+			}
+			switch {
+			case a.Key != "" && len(a.Key) == 1 && a.Key >= "1" && a.Key <= "9":
+				if err := s.Launcher.Type(ctx, a.Agent, "", a.Key, false); err != nil {
+					return nil, err
+				}
+			case a.Key != "":
+				if err := s.Launcher.Key(ctx, a.Agent, "", a.Key); err != nil {
+					return nil, err
+				}
+			case a.Text != "":
+				if err := s.Launcher.Type(ctx, a.Agent, "", a.Text, true); err != nil {
+					return nil, err
+				}
+			default:
+				return nil, errors.New("give text or key")
+			}
+			time.Sleep(800 * time.Millisecond)
+			return s.Launcher.Screen(ctx, a.Agent, "", 40)
 		})
 	return srv
 }

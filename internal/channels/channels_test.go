@@ -3,6 +3,7 @@ package channels
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -353,5 +354,75 @@ func TestPairTelegram(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("pairing did not finish")
+	}
+}
+
+// fakeTerm is a Launcher with one agent stopped on a permission prompt.
+type fakeTerm struct {
+	mu    sync.Mutex
+	typed []string
+	keys  []string
+}
+
+func (f *fakeTerm) StartTask(context.Context, string, string) (core.StartResult, error) {
+	return core.StartResult{}, nil
+}
+func (f *fakeTerm) Screen(_ context.Context, agent, task string, _ int) (core.Screen, error) {
+	return core.Screen{Agent: agent, Text: "Bash(rm -rf node_modules)\nDo you want to proceed?\n❯ 1. Yes\n  2. No\n\n"}, nil
+}
+func (f *fakeTerm) Type(_ context.Context, agent, task, text string, enter bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.typed = append(f.typed, fmt.Sprintf("%s|%s|%s|%v", agent, task, text, enter))
+	return nil
+}
+func (f *fakeTerm) Key(_ context.Context, agent, task, key string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.keys = append(f.keys, agent+"|"+key)
+	return nil
+}
+
+func TestBlockedAgentTerminalPrompt(t *testing.T) {
+	screenWait = 0
+	svc := newService(t)
+	agent := addAgent(t, svc, "claude")
+	term := &fakeTerm{}
+	f, ts := newFakeTelegram(t)
+	tg := NewTelegram(TelegramConfig{Token: "TOKEN", ChatID: chat, UserID: 7})
+	tg.API().Base = ts.URL
+	h := &Hub{Svc: svc, Dispatch: term, Channels: []Channel{tg}, Logf: t.Logf}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go h.Run(ctx)
+	time.Sleep(100 * time.Millisecond)
+
+	// Claude Code's Notification hook reports blocked while it shows its own
+	// permission dialog, which never reaches the queue.
+	if err := svc.ReportStatus(ctx, agent, core.StatusReport{State: core.StateBlocked}); err != nil {
+		t.Fatal(err)
+	}
+	sent := f.wait(t, "sendMessage", textHas("Do you want to proceed?"))
+	text := sent["text"].(string)
+	if !strings.Contains(text, "term:claude") {
+		t.Fatalf("no terminal ref: %s", text)
+	}
+	kb, _ := json.Marshal(sent["reply_markup"])
+	if !strings.Contains(string(kb), "k:1:term:claude") || !strings.Contains(string(kb), "k:Escape:term:claude") {
+		t.Fatalf("keyboard %s", kb)
+	}
+
+	// Pressing "1" picks the option; the new screen comes back.
+	f.updates <- update{UpdateID: 1, CallbackQuery: &callbackQuery{ID: "cb", From: tgUser{ID: 7}, Data: "k:1:term:claude",
+		Message: &tgMessage{Chat: tgChat{ID: chat}}}}
+	f.wait(t, "answerCallbackQuery", func(b map[string]any) bool { return b["text"] == "Sent" })
+	f.wait(t, "sendMessage", textHas("terminal</b>"))
+	// A reply is typed, with Enter.
+	f.updates <- msgFrom(7, "use pnpm instead", text)
+	f.wait(t, "sendMessage", textHas("Typed into claude's terminal"))
+	term.mu.Lock()
+	defer term.mu.Unlock()
+	if len(term.typed) != 2 || term.typed[0] != "claude||1|false" || term.typed[1] != "claude||use pnpm instead|true" {
+		t.Fatalf("typed %v", term.typed)
 	}
 }

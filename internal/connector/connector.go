@@ -62,6 +62,8 @@ type Server struct {
 type Launcher interface {
 	StartTask(ctx context.Context, id, lead string) (core.StartResult, error)
 	Screen(ctx context.Context, agent, task string, lines int) (core.Screen, error)
+	Type(ctx context.Context, agent, task, text string, enter bool) error
+	Key(ctx context.Context, agent, task, key string) error
 }
 
 // Client is an app that registered itself (RFC 7591).

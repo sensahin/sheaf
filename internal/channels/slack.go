@@ -71,6 +71,8 @@ func FormatSlack(n Notice) string {
 	}
 	var foot []string
 	switch {
+	case n.Terminal:
+		foot = append(foot, "Reply in thread to type into "+n.Agent+"'s terminal")
 	case n.Kind == NoticeQuestion:
 		foot = append(foot, "Reply in thread to answer")
 	case n.Decidable:
@@ -81,13 +83,23 @@ func FormatSlack(n Notice) string {
 	if n.Ref != "" {
 		foot = append(foot, n.Ref)
 	}
-	if n.Task != "" {
+	if n.Task != "" && !n.Terminal {
 		foot = append(foot, n.Task)
 	}
 	if len(foot) > 0 {
 		fmt.Fprintf(&b, "\n_%s_", strings.Join(foot, " · "))
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// termBlock offers TermKeys for the terminal ref names.
+func termBlock(ref string) any {
+	var els []any
+	for _, k := range TermKeys {
+		els = append(els, map[string]any{"type": "button", "action_id": "key:" + k[1], "value": ref,
+			"text": map[string]string{"type": "plain_text", "text": k[0]}})
+	}
+	return map[string]any{"type": "actions", "elements": els}
 }
 
 func slackBlocks(text string, decide string) []any {
@@ -113,7 +125,11 @@ func (s *Slack) Send(ctx context.Context, n Notice) error {
 	if n.Decidable {
 		decide = n.Ref
 	}
-	ts, err := s.api.Post(ctx, s.cfg.Channel, "", n.Title, slackBlocks(text, decide))
+	blocks := slackBlocks(text, decide)
+	if n.Terminal {
+		blocks = append(blocks, termBlock(n.Ref))
+	}
+	ts, err := s.api.Post(ctx, s.cfg.Channel, "", n.Title, blocks)
 	if err != nil {
 		return err
 	}
@@ -275,6 +291,16 @@ func (s *Slack) onAction(ctx context.Context, h *Hub, payload json.RawMessage) {
 		return
 	}
 	act := p.Actions[0]
+	if key, ok := strings.CutPrefix(act.ActionID, "key:"); ok {
+		agent, _, _ := ParseTermRef(act.Value)
+		screen, err := h.Press(ctx, s.Name(), act.Value, key)
+		if err != nil {
+			s.api.Post(ctx, s.cfg.Channel, p.Message.TS, errText(err), nil)
+			return
+		}
+		s.Send(ctx, Notice{Kind: NoticeInfo, Agent: agent, Title: agent + "'s terminal", Detail: screen, Ref: act.Value, Terminal: true})
+		return
+	}
 	if act.ActionID != "approve" && act.ActionID != "deny" {
 		return
 	}
