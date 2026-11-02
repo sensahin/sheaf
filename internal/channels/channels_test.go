@@ -215,16 +215,17 @@ func TestTelegramMessagesBothWays(t *testing.T) {
 	}
 
 	f.updates <- msgFrom(7, "Nice, now fix the footer", sent["text"].(string))
-	f.wait(t, "sendMessage", textHas("Sent to claude"))
+	f.wait(t, "sendMessage", textHas("Queued for claude"))
 	in, _ := svc.Inbox(ctx, agent, core.InboxRequest{})
 	if len(in) != 1 || in[0].Body != "Nice, now fix the footer" || in[0].From != core.Human {
 		t.Fatalf("inbox %+v", in)
 	}
+	f.wait(t, "sendMessage", textHas("claude read your message"))
 
 	// A stranger writing to the bot is ignored.
 	f.updates <- update{UpdateID: 99, Message: &tgMessage{From: &tgUser{ID: 666}, Chat: tgChat{ID: 666}, Text: "/agents"}}
 	f.updates <- msgFrom(7, "@claude also check mobile", "")
-	f.wait(t, "sendMessage", textHas("Sent to claude"))
+	f.wait(t, "sendMessage", textHas("Queued for claude"))
 	f.mu.Lock()
 	for _, c := range f.calls {
 		if c.Method == "sendMessage" && c.Body["chat_id"] == float64(666) {
@@ -424,5 +425,45 @@ func TestBlockedAgentTerminalPrompt(t *testing.T) {
 	defer term.mu.Unlock()
 	if len(term.typed) != 2 || term.typed[0] != "claude||1|false" || term.typed[1] != "claude||use pnpm instead|true" {
 		t.Fatalf("typed %v", term.typed)
+	}
+}
+
+func TestPendingQuestionDoesNotAlsoOfferTerminalButtons(t *testing.T) {
+	svc := newService(t)
+	agent := addAgent(t, svc, "codex")
+	ctx := context.Background()
+	h := &Hub{Svc: svc, Dispatch: &fakeTerm{}}
+	_, err := svc.RequestApproval(ctx, agent, core.ApprovalRequest{Kind: core.ApprovalQuestion, Summary: "Which colour?"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, ok, err := h.NoticeFor(ctx, core.Event{Type: "agent.status", Actor: "codex", Data: json.RawMessage(`{"state":"blocked"}`)})
+	if err != nil || ok {
+		t.Fatalf("duplicate terminal notice: %v %v", ok, err)
+	}
+	// Another agent's queue item must not hide a real native prompt.
+	_, ok, err = h.NoticeFor(ctx, core.Event{Type: "agent.status", Actor: "claude", Data: json.RawMessage(`{"state":"blocked"}`)})
+	if err != nil || !ok {
+		t.Fatalf("missing terminal notice: %v %v", ok, err)
+	}
+}
+
+func TestMessageAcknowledgementExplainsBusyAgent(t *testing.T) {
+	svc := newService(t)
+	agent := addAgent(t, svc, "claude")
+	ctx := context.Background()
+	h := &Hub{Svc: svc}
+	for _, state := range []string{core.StateWorking, core.StateBlocked} {
+		svc.ReportStatus(ctx, agent, core.StatusReport{State: state})
+		ack, err := h.message(ctx, core.HumanCaller, "claude", "", "Are you there?")
+		if err != nil || !strings.Contains(ack, "Queued for claude · m-") || strings.Contains(ack, "Sent to") {
+			t.Fatalf("ack: %q %v", ack, err)
+		}
+		if state == core.StateWorking && !strings.Contains(ack, "current turn finishes") {
+			t.Fatal(ack)
+		}
+		if state == core.StateBlocked && !strings.Contains(ack, "/screen claude") {
+			t.Fatal(ack)
+		}
 	}
 }

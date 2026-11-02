@@ -163,6 +163,7 @@ func codex(sheaf string) Plan {
 		Steps: []string{
 			"Add Sheaf's MCP server to ~/.codex/config.toml:\n\n" +
 				"[mcp_servers.sheaf]\n" +
+				"default_tools_approval_mode = \"approve\"\n" +
 				"command = " + tomlString(sheaf) + "\n" +
 				"args = [\"mcp\"]\n" +
 				"env_vars = [\"SHEAF_TOKEN\", \"SHEAF_HOME\"]",

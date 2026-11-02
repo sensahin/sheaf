@@ -245,11 +245,40 @@ func (h *Hub) NoticeFor(ctx context.Context, ev core.Event) (Notice, bool, error
 		}
 		h.addTitle(ctx, &n)
 		return n, true, nil
+	case "message.read":
+		if ev.Actor == core.Human {
+			return Notice{}, false, nil
+		}
+		var last *core.Message
+		ids, _ := d["ids"].([]any)
+		for _, id := range ids {
+			s, _ := id.(string)
+			m, err := h.Svc.MessageStatus(ctx, core.HumanCaller, s)
+			if err == nil && m.From == core.Human && m.To == ev.Actor {
+				last = &m
+			}
+		}
+		if last == nil {
+			return Notice{}, false, nil
+		}
+		return Notice{Kind: NoticeInfo, Agent: ev.Actor, Task: last.Task, Ref: last.ID,
+			Title: ev.Actor + " read your message", Body: "Its response will appear here when it replies through Sheaf."}, true, nil
 	case "agent.status":
 		state, task, note := str("state"), str("task"), str("note")
 		n := Notice{Agent: ev.Actor, Task: task, Body: note}
 		switch state {
 		case core.StateBlocked:
+			// The actionable question/approval already has its own notice.
+			// A second terminal notice would route replies to the wrong place.
+			pending, err := h.Svc.ListApprovals(ctx, core.ApprovalPending)
+			if err != nil {
+				return Notice{}, false, err
+			}
+			for _, a := range pending {
+				if a.Agent == ev.Actor && (task == "" || a.Task == task) {
+					return Notice{}, false, nil
+				}
+			}
 			n.Kind, n.Title = NoticeBlocked, ev.Actor+" is blocked"
 			h.attachScreen(ctx, &n)
 		case core.StateDone:
@@ -491,10 +520,18 @@ func (h *Hub) Reply(ctx context.Context, channel, ref, text string) (string, err
 }
 
 func (h *Hub) message(ctx context.Context, c core.Caller, agent, task, text string) (string, error) {
-	if _, err := h.Svc.Send(ctx, c, core.SendRequest{To: agent, Task: task, Body: text}); err != nil {
+	m, err := h.Svc.Send(ctx, c, core.SendRequest{To: agent, Task: task, Body: text})
+	if err != nil {
 		return "", err
 	}
-	return "Sent to " + agent + ".", nil
+	ack := "Queued for " + agent + " · " + m.ID + "."
+	a, err := h.Svc.GetAgent(ctx, agent)
+	if err == nil && a.State == core.StateWorking {
+		ack += " It is working; it will read this when its current turn finishes."
+	} else if err == nil && a.State == core.StateBlocked {
+		ack += " It is waiting for input. Answer its question or approval here; use /screen " + agent + " for a terminal prompt."
+	}
+	return ack, nil
 }
 
 // Help is the command list every channel shows.
