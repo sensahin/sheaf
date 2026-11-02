@@ -281,6 +281,26 @@ prints a systemd unit for it, and `--public-url` makes pairing links point at
 your Tailscale or HTTPS address. [docs/remote-server.md](docs/remote-server.md)
 walks through a Hetzner Ubuntu server step by step.
 
+## Answer agents from Telegram, Slack, Claude or ChatGPT
+
+You don't have to open the queue. Agents can reach you in the apps you already
+use:
+
+- **Telegram** and **Slack**: approvals arrive with Approve and Deny buttons,
+  and questions and messages from agents arrive as chat messages. Reply to
+  answer, or send `/task claude Redesign the about page` to start new work.
+  Neither needs a public address.
+- **Claude and ChatGPT apps**: add Sheaf as a custom connector. Then you can
+  ask what your agents are doing, create tasks, message agents and decide
+  approvals from a normal chat.
+
+```sh
+sheaf channel add telegram 123456:ABC...     # token from @BotFather
+sheaf connector enable --url https://<server>.<tailnet>.ts.net:8443
+```
+
+[docs/channels.md](docs/channels.md) has copy-paste setup for each channel.
+
 ## Tools agents get
 
 | Tool | What it does |

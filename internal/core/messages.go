@@ -168,3 +168,58 @@ func (s *Service) insertMessage(tx *sql.Tx, from, to, task, kind, body string) (
 	}
 	return m, s.emit(tx, from, "message.sent", m.ID, map[string]string{"to": to, "kind": kind, "task": task})
 }
+
+// MarkRead marks messages to the caller as read, for a bridge that delivered
+// them somewhere else (a chat app), so the sender's receipt says they arrived.
+func (s *Service) MarkRead(ctx context.Context, c Caller, ids ...string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		now := s.now()
+		var done []string
+		for _, id := range ids {
+			r, err := tx.Exec(`UPDATE messages SET read_at = ? WHERE id = ? AND recipient = ? AND read_at IS NULL`, now, id, c.Name)
+			if err != nil {
+				return err
+			}
+			if n, _ := r.RowsAffected(); n > 0 {
+				done = append(done, id)
+			}
+		}
+		if len(done) == 0 {
+			return nil
+		}
+		return s.emit(tx, c.Name, "message.read", "", map[string][]string{"ids": done})
+	})
+}
+
+// TaskMessages returns the newest messages about a task, oldest first: the
+// handoff notes, questions and reports that tell its story.
+func (s *Service) TaskMessages(ctx context.Context, task string, limit int) ([]Message, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 20
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT * FROM (SELECT id, sender, recipient, task, kind, body, created_at, read_at FROM messages
+		WHERE task = ? ORDER BY created_at DESC, id DESC LIMIT ?) ORDER BY created_at, id`, task, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Message{}
+	for rows.Next() {
+		var m Message
+		var created string
+		var read sql.NullString
+		if err := rows.Scan(&m.ID, &m.From, &m.To, &m.Task, &m.Kind, &m.Body, &created, &read); err != nil {
+			return nil, err
+		}
+		m.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+		if read.Valid {
+			t, _ := time.Parse(time.RFC3339Nano, read.String)
+			m.ReadAt = &t
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}

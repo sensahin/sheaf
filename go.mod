@@ -3,12 +3,15 @@ module github.com/sensahin/sheaf
 go 1.26.0
 
 require (
+	github.com/coder/websocket v1.8.14
+	github.com/creack/pty v1.1.24
 	github.com/modelcontextprotocol/go-sdk v1.8.0
+	golang.org/x/term v0.47.0
 	modernc.org/sqlite v1.61.0
+	rsc.io/qr v0.2.0
 )
 
 require (
-	github.com/creack/pty v1.1.24 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -21,10 +24,8 @@ require (
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
-	golang.org/x/term v0.47.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	modernc.org/libc v1.79.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
-	rsc.io/qr v0.2.0 // indirect
 )
