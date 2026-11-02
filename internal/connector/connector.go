@@ -381,6 +381,7 @@ button{font:inherit;font-weight:600;width:100%;padding:12px;border:0;border-radi
 
 type pageData struct {
 	App, Host, Where, Error, Fatal string
+	CallbackOrigin                 string
 	Hidden                         map[string]string
 }
 
@@ -388,7 +389,13 @@ func (s *Server) renderPage(w http.ResponseWriter, code int, d pageData) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Frame-Options", "DENY")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'")
+	formAction := "'self'"
+	if d.CallbackOrigin != "" {
+		// Chrome also checks form-action on the redirect after the POST.
+		// Permit only the callback origin already validated for this client.
+		formAction += " " + d.CallbackOrigin
+	}
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action "+formAction+"; frame-ancestors 'none'")
 	w.WriteHeader(code)
 	page.Execute(w, d)
 }
@@ -399,10 +406,12 @@ func (s *Server) pageFor(r *http.Request, p authParams, c Client) pageData {
 		app = "An app"
 	}
 	host := p.RedirectURI
+	origin := ""
 	if u, err := url.Parse(p.RedirectURI); err == nil {
 		host = u.Host
+		origin = u.Scheme + "://" + u.Host
 	}
-	return pageData{App: app, Host: host, Hidden: map[string]string{
+	return pageData{App: app, Host: host, CallbackOrigin: origin, Hidden: map[string]string{
 		"client_id": p.ClientID, "redirect_uri": p.RedirectURI, "state": p.State,
 		"code_challenge": p.Challenge, "code_challenge_method": p.Method, "scope": p.Scope, "resource": p.Resource,
 		"response_type": "code",
