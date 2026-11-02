@@ -189,6 +189,40 @@ func (s *Service) WaitApproval(ctx context.Context, c Caller, id string, timeout
 		a, err = s.GetApproval(ctx, c, id)
 		return err != nil || a.Status != ApprovalPending, err
 	})
+	if err == nil && !c.IsHuman() && a.Status != ApprovalPending {
+		// The waiter has received this decision. Keep the inbox copy for the
+		// audit trail, but don't wake another turn to deliver it a second time.
+		prefix := id + " "
+		err = s.tx(ctx, func(tx *sql.Tx) error {
+			rows, err := tx.Query(`SELECT id FROM messages WHERE sender = ? AND recipient = ? AND kind = ? AND read_at IS NULL AND substr(body, 1, ?) = ?`, Human, c.Name, KindDecision, len(prefix), prefix)
+			if err != nil {
+				return err
+			}
+			var ids []string
+			for rows.Next() {
+				var id string
+				if err := rows.Scan(&id); err != nil {
+					rows.Close()
+					return err
+				}
+				ids = append(ids, id)
+			}
+			err = rows.Err()
+			rows.Close()
+			if err != nil {
+				return err
+			}
+			for _, id := range ids {
+				if _, err := tx.Exec(`UPDATE messages SET read_at = ? WHERE id = ?`, s.now(), id); err != nil {
+					return err
+				}
+			}
+			if len(ids) == 0 {
+				return nil
+			}
+			return s.emit(tx, c.Name, "message.read", "", map[string][]string{"ids": ids})
+		})
+	}
 	return a, err
 }
 

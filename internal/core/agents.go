@@ -200,6 +200,9 @@ type StatusReport struct {
 	Note  string `json:"note,omitempty"`
 	// Task, if set, also moves that task for working, blocked and done.
 	Task string `json:"task,omitempty"`
+	// Lifecycle is an automatic terminal/hook observation. It reports the
+	// agent without reopening a finished task or changing a handed-off task.
+	Lifecycle bool `json:"lifecycle,omitempty"`
 }
 
 // ReportStatus updates the caller's state and, optionally, its task's status.
@@ -221,10 +224,16 @@ func (s *Service) ReportStatus(ctx context.Context, c Caller, r StatusReport) er
 				return err
 			}
 			if t.Owner != c.Name {
-				return forbiddenf("task %s is owned by %q", t.ID, t.Owner)
+				if !r.Lifecycle {
+					return forbiddenf("task %s is owned by %q", t.ID, t.Owner)
+				}
 			}
-			if _, err := tx.Exec(`UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?`, r.State, now, r.Task); err != nil {
-				return err
+			if r.Lifecycle && (t.Owner != c.Name || t.Status == TaskDone || t.Status == TaskCancelled) {
+				r.Task = ""
+			} else {
+				if _, err := tx.Exec(`UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?`, r.State, now, r.Task); err != nil {
+					return err
+				}
 			}
 		}
 		return s.emit(tx, c.Name, "agent.status", r.Task, r)

@@ -24,21 +24,30 @@ type typedKeys struct {
 
 // fakeTerm is a tmux server in memory.
 type fakeTerm struct {
-	mu      sync.Mutex
-	windows []Window
-	opened  []launch.Spec
-	typed   []typedKeys
+	mu        sync.Mutex
+	windows   []Window
+	opened    []launch.Spec
+	typed     []typedKeys
+	typeErr   error
+	openErr   error
+	onWindows func()
 }
 
 func (f *fakeTerm) Windows() ([]Window, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.onWindows != nil {
+		f.onWindows()
+	}
 	return append([]Window(nil), f.windows...), nil
 }
 
 func (f *fakeTerm) Open(s launch.Spec) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.openErr != nil {
+		return f.openErr
+	}
 	f.opened = append(f.opened, s)
 	name := s.Agent
 	if s.Task != "" {
@@ -55,6 +64,9 @@ func (f *fakeTerm) Capture(target string, lines int) (string, error) {
 func (f *fakeTerm) Type(target, text string, enter bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.typeErr != nil {
+		return f.typeErr
+	}
 	f.typed = append(f.typed, typedKeys{target, text, enter})
 	return nil
 }
@@ -138,6 +150,9 @@ func TestStartTask(t *testing.T) {
 	// The worktree got the agent's hooks.
 	if _, err := os.Stat(filepath.Join(task.Worktree, ".claude", "settings.json")); err != nil {
 		t.Fatalf("worktree not prepared: %v", err)
+	}
+	if !strings.Contains(s.Command, "send progress and your final answer") || !strings.Contains(s.Command, "For a read-only task") {
+		t.Fatalf("task prompt omits channel replies: %s", s.Command)
 	}
 
 	// Starting again types into the existing window instead of opening another.
@@ -238,6 +253,118 @@ func TestFreshAgentIsLeftAlone(t *testing.T) {
 	}
 	if _, n := term.counts(); n != 0 {
 		t.Fatalf("rang a booting agent: %+v", term.typed)
+	}
+}
+
+func TestStoppedAgentStartsConversationWithoutATask(t *testing.T) {
+	d, term, _ := newDispatcher(t)
+	ctx := context.Background()
+	d.Svc.Send(ctx, core.HumanCaller, core.SendRequest{To: "codex", Body: "Are you there?"})
+	term.openErr = errors.New("temporary terminal failure")
+	if err := d.Check(ctx, "codex"); err == nil {
+		t.Fatal("expected launch failure")
+	}
+	term.openErr = nil
+	if err := d.Check(ctx, "codex"); err != nil {
+		t.Fatal(err)
+	}
+	if len(term.opened) != 1 {
+		t.Fatalf("conversation launches: %d", len(term.opened))
+	}
+	s := term.opened[0]
+	if s.Task != "" || s.Dir != filepath.Join(d.Paths.Home, "chats", "codex") || !strings.Contains(s.Command, "Read your inbox now") || !strings.Contains(s.Command, "send your answers to human") {
+		t.Fatalf("conversation: %+v", s)
+	}
+	if err := d.Check(ctx, "codex"); err != nil {
+		t.Fatal(err)
+	}
+	if o, n := term.counts(); o != 1 || n != 0 {
+		t.Fatalf("duplicate delivery: %d %d", o, n)
+	}
+}
+
+func TestDoneAgentGetsFollowupAndFailedWritesAreRetried(t *testing.T) {
+	d, term, _ := newDispatcher(t)
+	ctx := context.Background()
+	term.windows = []Window{{Target: "@old", Name: "codex:t-old"}, {Target: "@new", Name: "codex:t-new"}}
+	d.Svc.ReportStatus(ctx, core.Caller{Name: "codex"}, core.StatusReport{State: core.StateDone})
+	d.Svc.Send(ctx, core.HumanCaller, core.SendRequest{To: "codex", Body: "A followup"})
+	term.typeErr = errors.New("temporary terminal failure")
+	if err := d.Check(ctx, "codex"); err == nil {
+		t.Fatal("expected send failure")
+	}
+	term.typeErr = nil
+	if err := d.Check(ctx, "codex"); err != nil {
+		t.Fatal(err)
+	}
+	if len(term.typed) != 1 || term.typed[0].target != "@new" || !strings.Contains(term.typed[0].text, "reply through Sheaf") {
+		t.Fatalf("followup: %+v", term.typed)
+	}
+}
+
+func TestRunRecoversInboxQueuedBeforeStartup(t *testing.T) {
+	d, term, _ := newDispatcher(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	d.Svc.Send(ctx, core.HumanCaller, core.SendRequest{To: "codex", Body: "Queued before restart"})
+	done := make(chan error, 1)
+	go func() { done <- d.Run(ctx) }()
+	waitFor(t, func() bool { o, _ := term.counts(); return o == 1 })
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHandoffOpensTaskWorktreeInsteadOfExistingChat(t *testing.T) {
+	d, term, repo := newDispatcher(t)
+	ctx := context.Background()
+	term.windows = []Window{{Target: "@chat", Name: "codex"}}
+	task, err := d.Svc.CreateTask(ctx, core.HumanCaller, core.TaskSpec{Title: "Review", Owner: "claude", Repo: repo, Worktree: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Svc.Handoff(ctx, core.Caller{Name: "claude"}, core.HandoffRequest{Task: task.ID, To: "codex", Note: "Review this task"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Check(ctx, "codex"); err != nil {
+		t.Fatal(err)
+	}
+	if len(term.opened) != 1 || term.opened[0].Task != task.ID || term.opened[0].Dir != task.Worktree || len(term.typed) != 0 {
+		t.Fatalf("handoff escaped its worktree: opened=%+v typed=%+v", term.opened, term.typed)
+	}
+}
+
+func TestMessagesDoNotTypeIntoBlockedPromptsOrWorkingAgents(t *testing.T) {
+	for _, state := range []string{core.StateBlocked, core.StateWorking} {
+		t.Run(state, func(t *testing.T) {
+			d, term, _ := newDispatcher(t)
+			ctx := context.Background()
+			term.windows = []Window{{Target: "@codex", Name: "codex"}}
+			d.Svc.ReportStatus(ctx, core.Caller{Name: "codex"}, core.StatusReport{State: state})
+			d.Svc.Send(ctx, core.HumanCaller, core.SendRequest{To: "codex", Body: "Followup"})
+			if err := d.Check(ctx, "codex"); err != nil {
+				t.Fatal(err)
+			}
+			if _, n := term.counts(); n != 0 {
+				t.Fatal("typed into a busy terminal")
+			}
+		})
+	}
+}
+
+func TestAgentStartingWorkDuringInboxDeliveryIsNotInterrupted(t *testing.T) {
+	d, term, _ := newDispatcher(t)
+	ctx := context.Background()
+	term.windows = []Window{{Target: "@codex", Name: "codex"}}
+	d.Svc.Send(ctx, core.HumanCaller, core.SendRequest{To: "codex", Body: "Followup"})
+	term.onWindows = func() {
+		d.Svc.ReportStatus(ctx, core.Caller{Name: "codex"}, core.StatusReport{State: core.StateWorking})
+	}
+	if err := d.Check(ctx, "codex"); err != nil {
+		t.Fatal(err)
+	}
+	if _, n := term.counts(); n != 0 {
+		t.Fatal("used an old idle state after the agent began working")
 	}
 }
 

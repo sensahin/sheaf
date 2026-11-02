@@ -218,8 +218,8 @@ func TestApprovalFlow(t *testing.T) {
 	if _, err := s.Decide(ctx, HumanCaller, DecideRequest{ID: ap.ID, Status: ApprovalDenied}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("decided twice: %v", err)
 	}
-	msgs, _ := s.Inbox(ctx, b, InboxRequest{})
-	if len(msgs) != 1 || msgs[0].Kind != KindDecision || !strings.Contains(msgs[0].Body, "feature branch only") {
+	msgs, _ := s.Inbox(ctx, b, InboxRequest{All: true})
+	if len(msgs) != 1 || msgs[0].Kind != KindDecision || msgs[0].ReadAt == nil || !strings.Contains(msgs[0].Body, "feature branch only") {
 		t.Fatalf("decision message: %v", msgs)
 	}
 	if q, _ := s.ListApprovals(ctx, ""); len(q) != 0 {

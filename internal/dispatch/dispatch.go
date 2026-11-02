@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -36,12 +37,13 @@ type Dispatcher struct {
 	// Sheaf is the path to the sheaf binary agents run under.
 	Sheaf string
 	Term  Terminal
-	// Auto starts an agent that is handed a task while it is not running.
+	// Auto starts stopped agents for handoffs and inbox conversations.
 	Auto bool
 	// Logf reports what the dispatcher did; nil is quiet.
 	Logf func(format string, a ...any)
 
 	mu       sync.Mutex
+	checkMu  sync.Mutex           // serialize inbox delivery, including startup recovery
 	notified map[string]string    // agent -> newest message it was told about
 	started  map[string]time.Time // agent -> when the dispatcher last started it
 }
@@ -78,9 +80,7 @@ func (d *Dispatcher) window(agent, task string) (Window, bool, error) {
 		if task != "" && w.Name == agent+":"+task {
 			return w, true, nil
 		}
-		if found == nil {
-			found = &ws[i]
-		}
+		found = &ws[i] // otherwise use the newest conversation, not an old task
 	}
 	if found == nil {
 		return Window{}, false, nil
@@ -125,8 +125,8 @@ func Prompt(agent string, t core.Task, lead string) string {
 	} else {
 		fmt.Fprintf(&b, "You are %s. ", agent)
 	}
-	fmt.Fprintf(&b, "Use Sheaf's MCP tools: read your inbox first, report_status with task %q as you work, and send to \"human\" if you need a decision. ", t.ID)
-	b.WriteString("When the change is ready, commit it on this branch, then request_approval with kind \"diff\" so it can be reviewed, or hand the task off to another agent for review. If the task asks you to push or open a pull request, do that after approval.")
+	fmt.Fprintf(&b, "Use Sheaf's MCP tools: read your inbox first, report_status with task %q as you work, and send progress and your final answer to \"human\" with this task ID. Terminal output alone does not reach the person. Ask questions with request_approval kind \"question\" and wait for the answer. ", t.ID)
+	b.WriteString("For a read-only task, send your findings and mark the task done; do not create a commit or diff approval when nothing changed. When a code change is ready, commit it on this branch, then request_approval with kind \"diff\" so it can be reviewed, or hand the task off to another agent for review. If the task asks you to push or open a pull request, do that after approval.")
 	return b.String()
 }
 
@@ -283,15 +283,28 @@ func (d *Dispatcher) Key(ctx context.Context, agent, task, key string) error {
 	return d.Svc.Record(ctx, core.Human, "agent.key", agent, map[string]string{"window": w.Name, "key": key})
 }
 
-// Run follows the event log until ctx ends, starting agents that were handed
-// work and ringing idle agents that have unread messages.
+// Run follows events and recovers queued inboxes until ctx ends.
 func (d *Dispatcher) Run(ctx context.Context) error {
 	after, err := d.Svc.LastEventID(ctx)
 	if err != nil {
 		return err
 	}
 	for {
-		evs, err := d.Svc.Events(ctx, after, 500, 30*time.Second)
+		// Also revisit the backlog. Events alone miss messages that predate a
+		// restart, failed terminal writes, and agents still booting at an event.
+		agents, err := d.Svc.ListAgents(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return err
+		}
+		for _, a := range agents {
+			if err := d.Check(ctx, a.Name); err != nil {
+				d.logf("dispatch %s: %v", a.Name, err)
+			}
+		}
+		evs, err := d.Svc.Events(ctx, after, 500, 2*time.Second)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -330,10 +343,11 @@ func wakes(e core.Event) string {
 	return ""
 }
 
-// Check looks at one agent's unread messages and acts: rings the doorbell if
-// it is running and idle, or starts it on its task if Auto is set and it is
-// not running. Each message is acted on once.
+// Check rings an available agent's doorbell, or starts a stopped agent on an
+// active task or a conversation when Auto is set. Failed delivery is retried.
 func (d *Dispatcher) Check(ctx context.Context, name string) error {
+	d.checkMu.Lock()
+	defer d.checkMu.Unlock()
 	a, err := d.Svc.GetAgent(ctx, name)
 	if err != nil {
 		return nil // removed meanwhile
@@ -357,32 +371,9 @@ func (d *Dispatcher) Check(ctx context.Context, name string) error {
 		d.notified[name] = newest
 		d.mu.Unlock()
 	}
-
-	w, running, err := d.window(name, "")
-	if err != nil {
-		return err
-	}
-	if running {
-		d.mu.Lock()
-		booting := time.Since(d.started[name]) < settle
-		d.mu.Unlock()
-		if a.State != core.StateIdle || booting {
-			return nil // asked again when it next reports idle
-		}
-		mark()
-		text := fmt.Sprintf("You have %d new message(s) in your Sheaf inbox. Read them with the inbox tool and act on them.", len(msgs))
-		if err := d.Term.Type(w.Target, text, true); err != nil {
-			return err
-		}
-		d.logf("told %s about %d new message(s)", name, len(msgs))
-		return d.Svc.Record(ctx, core.Human, "agent.nudged", name, map[string]any{"window": w.Name, "messages": len(msgs)})
-	}
-	if !d.Auto {
-		return nil
-	}
-	mark()
-	// Start it on the newest active task it owns that a message is about.
-	for i := len(msgs) - 1; i >= 0; i-- {
+	// A handoff needs its task's worktree even if the recipient already has
+	// a chat or another task open. Never run it in that unrelated window.
+	for i := len(msgs) - 1; d.Auto && i >= 0; i-- {
 		m := msgs[i]
 		if m.Task == "" {
 			continue
@@ -391,11 +382,85 @@ func (d *Dispatcher) Check(ctx context.Context, name string) error {
 		if err != nil || t.Owner != name || !active(t.Status) {
 			continue
 		}
+		w, running, err := d.window(name, t.ID)
+		if err != nil {
+			return err
+		}
+		if running && w.Name == name+":"+t.ID {
+			break
+		}
 		lead := fmt.Sprintf("%s sent you a %s about this task. Read your Sheaf inbox first.", m.From, m.Kind)
 		_, err = d.StartTask(ctx, t.ID, lead)
+		if err == nil {
+			mark()
+		}
 		return err
 	}
-	return nil
+
+	w, running, err := d.window(name, msgs[len(msgs)-1].Task)
+	if err != nil {
+		return err
+	}
+	if running {
+		// Inbox reads and tmux discovery can overlap a new turn. Recheck the
+		// current state immediately before typing, rather than using old idle.
+		a, err = d.Svc.GetAgent(ctx, name)
+		if err != nil {
+			return err
+		}
+		d.mu.Lock()
+		booting := time.Since(d.started[name]) < settle
+		d.mu.Unlock()
+		if (a.State != core.StateIdle && a.State != core.StateDone) || booting {
+			return nil // asked again when it next reports idle
+		}
+		text := fmt.Sprintf("You have %d new message(s) in your Sheaf inbox. Read them with the inbox tool and reply through Sheaf send to human; terminal output alone does not reach the person. Do not restart completed work unless the new message asks for it.", len(msgs))
+		if err := d.Term.Type(w.Target, text, true); err != nil {
+			return err
+		}
+		mark()
+		d.logf("told %s about %d new message(s)", name, len(msgs))
+		return d.Svc.Record(ctx, core.Human, "agent.nudged", name, map[string]any{"window": w.Name, "messages": len(msgs)})
+	}
+	if !d.Auto {
+		return nil
+	}
+	// A direct message is a conversation, even when there is no active task.
+	// Keep its writable working directory separate from repos and credentials.
+	if _, err := d.Paths.LoadAgentToken(name); err != nil {
+		return err
+	}
+	dir := filepath.Join(d.Paths.Home, "chats", name)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if _, err := setup.PrepareWorktree(dir, a.Kind, d.Sheaf); err != nil {
+		return err
+	}
+	command := a.StartCmd
+	if command == "" {
+		command = launch.DefaultCommands[a.Kind]
+	}
+	if command == "" {
+		return fmt.Errorf("no start command for agent %q", name)
+	}
+	prompt := fmt.Sprintf("You are %s, responding to messages through Sheaf. Read your inbox now and send your answers to human with Sheaf's send tool. Report status as you work and idle when finished. Terminal output alone does not reach the person. This is a conversation, not a request to resume completed tasks. Ask questions with request_approval kind question. Do not change code or external resources unless the person's message asks for that work; create a separate task and worktree for code changes.", name)
+	arg, _ := promptArg(a.Kind, prompt)
+	if err := d.Term.Open(launch.Spec{Agent: name, Dir: dir, Command: command + arg, Sheaf: d.Sheaf}); err != nil {
+		return err
+	}
+	d.mu.Lock()
+	if d.started == nil {
+		d.started = map[string]time.Time{}
+	}
+	d.started[name] = time.Now()
+	d.mu.Unlock()
+	// Unsupported CLIs need a later doorbell, rather than losing the inbox.
+	if arg != "" {
+		mark()
+	}
+	d.logf("started a conversation with %s", name)
+	return d.Svc.Record(ctx, core.Human, "agent.started", name, map[string]string{"dir": dir, "reason": "message"})
 }
 
 func active(status string) bool {

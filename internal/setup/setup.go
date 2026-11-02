@@ -163,6 +163,7 @@ func codex(sheaf string) Plan {
 		Steps: []string{
 			"Add Sheaf's MCP server to ~/.codex/config.toml:\n\n" +
 				"[mcp_servers.sheaf]\n" +
+				"default_tools_approval_mode = \"approve\"\n" +
 				"command = " + tomlString(sheaf) + "\n" +
 				"args = [\"mcp\"]\n" +
 				"env_vars = [\"SHEAF_TOKEN\", \"SHEAF_HOME\"]",
@@ -692,6 +693,15 @@ func PrepareWorktree(dir, kind, sheaf string) ([]string, error) {
 	res, err := Apply(dir, plan)
 	if err != nil {
 		return nil, err
+	}
+	if kind == "codex" {
+		for _, f := range files {
+			if f.Path == ".codex/hooks.json" {
+				if err := inheritCodexHookTrust(dir, f.Content); err != nil {
+					return nil, err
+				}
+			}
+		}
 	}
 	var wrote []string
 	for _, r := range res {

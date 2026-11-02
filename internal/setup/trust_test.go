@@ -2,6 +2,7 @@ package setup
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,67 @@ func fakeHome(t *testing.T) string {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("CODEX_HOME", "")
 	return home
+}
+
+func TestCodexHookTrustRequiresAnIdenticalAlreadyApprovedDefinition(t *testing.T) {
+	for _, tc := range []string{"approved", "no_approval", "disabled_source", "changed_source", "changed_target", "disabled_target"} {
+		t.Run(tc, func(t *testing.T) {
+			home := fakeHome(t)
+			plan, _ := For("codex", "/bin/sheaf")
+			expected := plan.Files[0].Content
+			source := filepath.Join(home, "trusted", ".codex", "hooks.json")
+			dir := filepath.Join(home, "chat")
+			target := filepath.Join(dir, ".codex", "hooks.json")
+			for _, p := range []string{source, target} {
+				os.MkdirAll(filepath.Dir(p), 0o700)
+				os.WriteFile(p, []byte(expected), 0o600)
+			}
+			if tc == "changed_source" {
+				os.WriteFile(source, []byte(strings.ReplaceAll(expected, "/bin/sheaf", "/bin/other")), 0o600)
+			}
+			if tc == "changed_target" {
+				os.WriteFile(target, []byte(strings.ReplaceAll(expected, "/bin/sheaf", "/bin/other")), 0o600)
+			}
+			config := filepath.Join(home, ".codex", "config.toml")
+			os.MkdirAll(filepath.Dir(config), 0o700)
+			hash := "sha256:" + strings.Repeat("a", 64)
+			s := "[mcp_servers.sheaf]\ncommand = \"unchanged\"\n"
+			for _, event := range []string{"pre_tool_use", "user_prompt_submit", "stop"} {
+				key := source + ":" + event + ":0:0"
+				s += fmt.Sprintf("\n[hooks.state.%s]\n", tomlString(key))
+				if tc != "no_approval" {
+					s += fmt.Sprintf("trusted_hash = %s\n", tomlString(hash))
+				}
+				if tc == "disabled_source" {
+					s += "enabled = false # explicitly disabled\n"
+				}
+				if tc == "disabled_target" {
+					s += fmt.Sprintf("\n[hooks.state.%s]\nenabled = false\n", tomlString(target+":"+event+":0:0"))
+				}
+			}
+			os.WriteFile(config, []byte(s), 0o600)
+			for i := 0; i < 2; i++ {
+				if err := inheritCodexHookTrust(dir, expected); err != nil {
+					t.Fatal(err)
+				}
+			}
+			b, _ := os.ReadFile(config)
+			if tc != "approved" && string(b) != s {
+				t.Fatalf("changed unapproved or disabled state: %s", b)
+			}
+			if tc == "approved" {
+				for _, event := range []string{"pre_tool_use", "user_prompt_submit", "stop"} {
+					header := "[hooks.state." + tomlString(target+":"+event+":0:0") + "]"
+					if strings.Count(string(b), header) != 1 {
+						t.Fatalf("missing or duplicate approval: %s", b)
+					}
+				}
+				if !strings.HasPrefix(string(b), s) {
+					t.Fatal("rewrote existing config")
+				}
+			}
+		})
+	}
 }
 
 func readJSON(t *testing.T, path string) map[string]any {

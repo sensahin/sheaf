@@ -493,6 +493,7 @@ func cmdRun(ctx context.Context, paths config.Paths, c *api.Client, args []strin
 		return fmt.Errorf("sheaf run reports status for an agent: set SHEAF_TOKEN to the agent's token")
 	}
 	report := func(ctx context.Context, r core.StatusReport) error {
+		r.Lifecycle = true
 		return c.Call(ctx, "agent.report_status", r, nil)
 	}
 	// Inside herdr or cmux, mirror the status into the terminal's sidebar

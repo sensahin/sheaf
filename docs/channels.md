@@ -54,7 +54,14 @@ chat can use it: messages from anyone else are ignored.
 - **Questions** open a reply box. Your reply is the answer, and the agent
   carries on.
 - **Messages** from an agent: reply to send your answer to that agent's inbox.
-  Sheaf wakes the agent if it is idle.
+  In headless mode, Sheaf starts a stopped agent for a conversation, or wakes
+  it when its current turn finishes. A finished task does not prevent follow-up
+  messages. Busy agents keep messages queued; an agent waiting on a question
+  or permission must have that prompt answered first. Queued messages survive
+  daemon restarts and failed terminal writes are retried.
+  The bot distinguishes **Queued** from **read**; the agent's answer then
+  arrives as its own message. Agents are instructed to send progress and final
+  answers through Sheaf, since ordinary terminal output is not a chat reply.
 - **Stuck on a terminal prompt.** An agent sometimes stops on its own
   prompt, such as Claude Code's "Do you want to proceed?" or a trust question,
   which never reaches the Sheaf queue. Claude Code reports this as
@@ -62,7 +69,8 @@ chat can use it: messages from anyone else are ignored.
   lines of its terminal with **1 / 2 / 3 / Enter / Esc / Screen** buttons. Tap
   one to pick a menu option, or reply to type text and Enter. After each tap
   you get the new screen. `/screen claude` brings up the same view at any
-  time.
+  time. If the agent has a pending Sheaf question or approval, use its existing
+  answer box or approval buttons; Sheaf does not send duplicate terminal controls.
 - **Finished** notices (and blocked agents that aren't Sheaf-run): reply to
   message the agent about that task.
 - Commands:
