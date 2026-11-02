@@ -5,7 +5,9 @@
 //	sheaf.db      SQLite event log and state
 //	sheaf.sock    the daemon's Unix socket
 //	owner.token   the human owner's token (mode 0600)
-//	agents/       each agent's token, so Sheaf can launch it (mode 0600)
+//	agents/       each agent's token, so Sheaf can launch it (mode 0600),
+//	              and its own NAME.env credentials
+//	env           credentials every agent gets (see env.go, mode 0600)
 //	worktrees/    one git worktree per task
 package config
 

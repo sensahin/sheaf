@@ -62,7 +62,13 @@ Setup
   sheaf service                    print a systemd unit for the daemon (Linux)
   sheaf agent add NAME [--kind K] [--command CMD] [--resume CMD]
   sheaf agent set NAME [--command CMD] [--resume CMD]
-  sheaf agent ls | rm NAME | token NAME | policy NAME [--set FILE]
+  sheaf agent ls | rm NAME | token NAME
+  sheaf agent policy NAME [--set FILE | --add-defaults]
+                                   show or change what goes to your queue
+  sheaf env set KEY [VALUE] [--agent A] | ls | rm KEY
+                                   credentials agents get (GH_TOKEN,
+                                   VERCEL_TOKEN, CLOUDFLARE_API_TOKEN, ...),
+                                   kept in ~/.sheaf/env, outside git
   sheaf repo add DIR [--name N] | ls | rm DIR
                                    repositories tasks can use from your phone
 
@@ -153,6 +159,8 @@ func run(args []string) error {
 		return cmdChannel(ctx, paths, rest)
 	case "connector":
 		return cmdConnector(ctx, paths, rest)
+	case "env":
+		return cmdEnv(paths, rest)
 	}
 
 	c, err := client(paths)
@@ -503,11 +511,17 @@ func cmdRun(ctx context.Context, paths config.Paths, c *api.Client, args []strin
 			return err
 		}
 	}
+	// Credentials for GitHub, Vercel, Cloudflare and the like come from
+	// ~/.sheaf/env and ~/.sheaf/agents/NAME.env (see `sheaf env`).
+	env, err := paths.AgentEnv(who.Name, os.Environ())
+	if err != nil {
+		return err
+	}
 	// Signals go to the agent through its terminal; Sheaf just outlives it.
 	signal.Ignore(os.Interrupt, syscall.SIGTERM)
 	code, err := agentrun.Run(context.Background(), agentrun.Options{
 		Command: fs.Args(),
-		Env:     os.Environ(),
+		Env:     env,
 		Task:    *task,
 		Stdin:   os.Stdin,
 		Stdout:  os.Stdout,
@@ -693,6 +707,7 @@ func cmdAgent(ctx context.Context, paths config.Paths, c *api.Client, args []str
 	resume := fs.String("resume", "", "command that resumes the agent, run in its task directory")
 	command := fs.String("command", "", "command that starts the agent on a task (default: the program for its kind)")
 	set := fs.String("set", "", "policy JSON file to apply")
+	addDefaults := fs.Bool("add-defaults", false, "add Sheaf's current default rules the agent's policy lacks")
 	pos, err := parse(fs, args[1:])
 	if err != nil {
 		return err
@@ -779,6 +794,14 @@ func cmdAgent(ctx context.Context, paths config.Paths, c *api.Client, args []str
 		var a core.Agent
 		if err := c.Call(ctx, "agent.get", api.NameReq{Name: pos[0]}, &a); err != nil {
 			return err
+		}
+		if *addDefaults {
+			p, added := a.Policy.WithDefaults()
+			if err := c.Call(ctx, "agent.set_policy", api.PolicyReq{Name: pos[0], Policy: p}, nil); err != nil {
+				return err
+			}
+			fmt.Printf("Added %d rule(s) to %s.\n", added, pos[0])
+			return nil
 		}
 		printJSON(a.Policy)
 		return nil

@@ -281,6 +281,11 @@ prints a systemd unit for it, and `--public-url` makes pairing links point at
 your Tailscale or HTTPS address. [docs/remote-server.md](docs/remote-server.md)
 walks through a Hetzner Ubuntu server step by step.
 
+Agents there can push, deploy and read logs on GitHub, Vercel and Cloudflare
+with tokens you keep in `~/.sheaf/env` (`sheaf env set CLOUDFLARE_API_TOKEN`),
+outside git; production deploys and deletions still wait for your approval.
+[docs/platform-access.md](docs/platform-access.md) has the steps.
+
 ## Answer agents from Telegram, Slack, Claude or ChatGPT
 
 You don't have to open the queue. Agents can reach you in the apps you already
