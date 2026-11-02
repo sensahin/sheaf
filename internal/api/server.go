@@ -32,6 +32,13 @@ type Server struct {
 	// Dispatch starts agents and shows their terminals. Nil when the daemon
 	// cannot (no tmux), and the methods that need it say so.
 	Dispatch Launcher
+
+	// Notify sends text to the person's chat channels and returns how many
+	// took it. Nil when no channel is configured.
+	Notify func(ctx context.Context, text string) int
+	// ConnectCode returns a one-time code for signing the Claude or ChatGPT
+	// app in. Nil when the connector is off.
+	ConnectCode func() string
 }
 
 // Launcher starts agents and reaches their terminals; the daemon's is
@@ -250,6 +257,9 @@ type (
 		Task string `json:"task,omitempty"`
 		Key  string `json:"key"`
 	}
+	TextReq struct {
+		Text string `json:"text,omitempty"`
+	}
 	PathReq struct {
 		Path string `json:"path"`
 	}
@@ -448,6 +458,32 @@ func (s *Server) methods() map[string]handler {
 		"device.revoke": typed(func(ctx context.Context, c core.Caller, r IDReq) (any, error) {
 			return OK{true}, svc.RevokeDevice(ctx, c, r.ID)
 		}),
+
+		"channel.test": typed(func(ctx context.Context, c core.Caller, r TextReq) (any, error) {
+			if !c.IsHuman() {
+				return nil, core.ErrForbidden
+			}
+			if s.Notify == nil {
+				return nil, fmt.Errorf("%w: no channel is configured, or the daemon started before you added one: restart it", core.ErrInvalid)
+			}
+			if r.Text == "" {
+				r.Text = "👋 Test from Sheaf. Your agents can reach you here."
+			}
+			n := s.Notify(ctx, r.Text)
+			if n == 0 {
+				return nil, fmt.Errorf("no channel delivered the message; see the daemon's log (journalctl --user -u sheaf)")
+			}
+			return map[string]int{"delivered": n}, nil
+		}),
+		"connector.code": func(ctx context.Context, c core.Caller, _ json.RawMessage) (any, error) {
+			if !c.IsHuman() || c.Device != "" {
+				return nil, fmt.Errorf("%w: this needs the owner token", core.ErrForbidden)
+			}
+			if s.ConnectCode == nil {
+				return nil, fmt.Errorf("%w: the connector is off; run `sheaf connector enable --url URL` and restart the daemon", core.ErrInvalid)
+			}
+			return map[string]string{"code": s.ConnectCode()}, nil
+		},
 
 		"events.head": func(ctx context.Context, c core.Caller, _ json.RawMessage) (any, error) {
 			if !c.IsHuman() {

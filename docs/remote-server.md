@@ -274,3 +274,10 @@ systemd starts the daemon again; the agents' tmux sessions are gone. Press
 - **Nothing happens when you message an idle agent**: the agent's status
   comes from its hooks; check `sheaf agent ls` shows it `idle`, and that
   `sheaf setup` ran in the repository.
+
+## Answer from Telegram, Slack, Claude or ChatGPT
+
+Once the daemon runs on the server, agents can reach you through a Telegram
+bot or a Slack app, and you can drive Sheaf from the Claude or ChatGPT app.
+Then you rarely need the queue page at all. See [channels.md](channels.md).
+

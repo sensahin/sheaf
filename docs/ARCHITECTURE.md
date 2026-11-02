@@ -95,6 +95,24 @@ pairing, the proxy, notifications from the event log) live in
 `internal/desktop` and are tested with the rest; only the window is in the
 separate `desktop/` module, so `go test ./...` never needs cgo.
 
+**Chat channels are a bridge on the event log, not a new path.**
+`internal/channels` follows the same event log as the web queue. It turns
+`approval.requested`, messages to `human`, and blocked or done reports into
+notices for Telegram (long polling) and Slack (Socket Mode). Neither needs a
+public address. Replies, button presses and commands go back through the core
+as a paired device would, so a chat app gets no right the phone page lacks.
+Notices name their approval, message or task id, so a reply finds its target
+even after a restart.
+
+**The Claude/ChatGPT connector has its own listener.** `internal/connector`
+serves a stateless streamable-HTTP MCP server and a minimal single-user OAuth
+2.1 server (dynamic client registration, PKCE S256). The person proves who they
+are with a one-time code sent to their chat channel or printed by
+`sheaf connector code`. The token it issues is a paired device, so
+`sheaf device revoke` signs an app out. It runs on a separate port (default
+127.0.0.1:7518) so that exposing it through Tailscale Funnel exposes only the
+connector.
+
 ## Data model
 
 | Table | Holds |

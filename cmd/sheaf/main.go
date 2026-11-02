@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -20,8 +21,10 @@ import (
 	"time"
 
 	"github.com/sensahin/sheaf/internal/api"
+	"github.com/sensahin/sheaf/internal/channels"
 	"github.com/sensahin/sheaf/internal/cmux"
 	"github.com/sensahin/sheaf/internal/config"
+	"github.com/sensahin/sheaf/internal/connector"
 	"github.com/sensahin/sheaf/internal/core"
 	"github.com/sensahin/sheaf/internal/dispatch"
 	"github.com/sensahin/sheaf/internal/herdr"
@@ -53,6 +56,7 @@ const usage = `sheaf: many agents, one agreement.
 Setup
   sheaf init                       create ~/.sheaf and your owner token
   sheaf daemon [--web ADDR|off] [--public-url URL] [--headless]
+               [--connector ADDR --connector-url URL]
                                    run the coordination daemon and web queue;
                                    --headless starts and wakes agents itself
   sheaf service                    print a systemd unit for the daemon (Linux)
@@ -75,6 +79,12 @@ Work
 Your queue
   sheaf pair [--name phone]        open the queue on your phone (QR code)
   sheaf device ls | revoke ID
+  sheaf channel add telegram TOKEN  agents message you on Telegram; you
+                                   approve and answer there (docs/channels.md)
+  sheaf channel add slack --bot-token T --app-token T
+  sheaf channel ls | rm NAME | test [TEXT]
+  sheaf connector enable --url URL  use Sheaf from the Claude / ChatGPT apps
+  sheaf connector code | disable
   sheaf queue [--all]              what needs you
   sheaf show ID                    one item, with its diff or command
   sheaf approve ID [NOTE]
@@ -139,6 +149,10 @@ func run(args []string) error {
 		return cmdSetup(rest)
 	case "service":
 		return cmdService(paths, rest)
+	case "channel", "channels":
+		return cmdChannel(ctx, paths, rest)
+	case "connector":
+		return cmdConnector(ctx, paths, rest)
 	}
 
 	c, err := client(paths)
@@ -273,11 +287,17 @@ func cmdDaemon(ctx context.Context, paths config.Paths, args []string) error {
 	web := fs.String("web", defaultWeb, `address for the web queue, or "off"; use 0.0.0.0:7517 or a Tailscale address to reach it from your phone`)
 	public := fs.String("public-url", "", "the address your phone opens, when it differs from --web (an HTTPS proxy, `tailscale serve`, an SSH tunnel)")
 	headless := fs.Bool("headless", false, "nobody is at this machine's keyboard: start agents that are handed work, and tell idle agents about new messages")
+	connListen := fs.String("connector", "", "address for the Claude/ChatGPT connector (default from `sheaf connector enable`, else off)")
+	connURL := fs.String("connector-url", "", "the public HTTPS address of the connector")
 	if _, err := parse(fs, args); err != nil {
 		return err
 	}
 	if err := paths.Ensure(); err != nil {
 		return err
+	}
+	chcfg, err := channels.LoadConfig(paths.Home)
+	if err != nil {
+		return fmt.Errorf("%s: %w", channels.ConfigPath(paths.Home), err)
 	}
 	tok, err := paths.LoadOrCreateOwnerToken()
 	if err != nil {
@@ -311,12 +331,15 @@ func cmdDaemon(ctx context.Context, paths config.Paths, args []string) error {
 		fmt.Fprintf(os.Stderr, "%d item(s) waiting in your queue: run `sheaf queue`\n", len(pending))
 	}
 	srv := api.NewServer(svc)
+	logf := func(f string, a ...any) { fmt.Fprintf(os.Stderr, f+"\n", a...) }
+	var launcher *dispatch.Dispatcher
 	if (dispatch.Tmux{}).Available() {
 		d := &dispatch.Dispatcher{
 			Svc: svc, Paths: paths, Sheaf: self(), Term: dispatch.Tmux{}, Auto: *headless,
 			Logf: func(f string, a ...any) { fmt.Fprintf(os.Stderr, f+"\n", a...) },
 		}
 		srv.Dispatch = d
+		launcher = d
 		if *headless {
 			go d.Run(ctx)
 			fmt.Fprintln(os.Stderr, "headless: agents handed work are started in tmux session \"sheaf\"; idle agents are told about new messages")
@@ -324,26 +347,91 @@ func cmdDaemon(ctx context.Context, paths config.Paths, args []string) error {
 	} else if *headless {
 		return errors.New("--headless needs tmux; install it (apt install tmux) and try again")
 	}
-	if *web == "off" {
-		return srv.ListenUnix(ctx, paths.Socket)
+
+	// Chat channels: agents reach you on Telegram or Slack.
+	hub := &channels.Hub{Svc: svc, Channels: chcfg.Build(), Logf: logf}
+	if launcher != nil {
+		hub.Dispatch = launcher
 	}
-	l, err := net.Listen("tcp", *web)
-	if err != nil {
-		return fmt.Errorf("web queue: %w (pass --web off to disable it)", err)
+	notify := func(ctx context.Context, text string) int {
+		return hub.Broadcast(ctx, channels.Notice{Kind: channels.NoticeInfo, Title: "Sheaf", Body: text})
 	}
-	srv.WebURL = webURL(l.Addr().(*net.TCPAddr))
-	if *public != "" {
-		srv.WebURL = strings.TrimRight(*public, "/")
+	if len(hub.Channels) > 0 {
+		srv.Notify = notify
+		go hub.Run(ctx)
+		fmt.Fprintf(os.Stderr, "agents reach you on: %s\n", strings.Join(chcfg.Names(), ", "))
 	}
-	fmt.Fprintf(os.Stderr, "web queue at %s (pair a device with `sheaf pair`)\n", srv.WebURL)
-	if !l.Addr().(*net.TCPAddr).IP.IsLoopback() && !strings.HasPrefix(srv.WebURL, "https://") {
-		fmt.Fprintln(os.Stderr, "warning: the web queue is reachable from your network over plain HTTP; prefer a private network such as Tailscale")
-	}
-	errc := make(chan error, 2)
-	go func() { errc <- srv.ListenTCP(ctx, l) }()
+
+	errc := make(chan error, 3)
+	// Either listener failing takes the daemon down; ctx stops the others.
 	go func() { errc <- srv.ListenUnix(ctx, paths.Socket) }()
-	// Either listener failing takes the daemon down; ctx stops the other.
+
+	// The connector for the Claude and ChatGPT apps, on its own listener so
+	// exposing it to the internet exposes nothing else.
+	if chcfg.Connector != nil {
+		if *connListen == "" {
+			*connListen = chcfg.Connector.Listen
+		}
+		if *connURL == "" {
+			*connURL = chcfg.Connector.URL
+		}
+	}
+	if *connURL != "" {
+		if !strings.HasPrefix(*connURL, "https://") {
+			return errors.New("--connector-url must be an https:// address; the Claude and ChatGPT apps only connect over HTTPS")
+		}
+		if *connListen == "" {
+			*connListen = defaultConnector
+		}
+		cs := &connector.Server{Svc: svc, BaseURL: strings.TrimRight(*connURL, "/"), Home: paths.Home, Version: version}
+		if launcher != nil {
+			cs.Launcher = launcher
+		}
+		if len(hub.Channels) > 0 {
+			cs.Notify = func(ctx context.Context, text string) bool { return notify(ctx, text) > 0 }
+		}
+		srv.ConnectCode = func() string { c, _ := cs.ConnectCode(); return c }
+		cl, err := net.Listen("tcp", *connListen)
+		if err != nil {
+			return fmt.Errorf("connector: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "connector for Claude/ChatGPT at %s/mcp (listening on %s)\n", cs.BaseURL, cl.Addr())
+		go func() { errc <- serveHTTP(ctx, cs.Handler(), cl) }()
+	}
+
+	if *web != "off" {
+		l, err := net.Listen("tcp", *web)
+		if err != nil {
+			return fmt.Errorf("web queue: %w (pass --web off to disable it)", err)
+		}
+		srv.WebURL = webURL(l.Addr().(*net.TCPAddr))
+		if *public != "" {
+			srv.WebURL = strings.TrimRight(*public, "/")
+		}
+		fmt.Fprintf(os.Stderr, "web queue at %s (pair a device with `sheaf pair`)\n", srv.WebURL)
+		if !l.Addr().(*net.TCPAddr).IP.IsLoopback() && !strings.HasPrefix(srv.WebURL, "https://") {
+			fmt.Fprintln(os.Stderr, "warning: the web queue is reachable from your network over plain HTTP; prefer a private network such as Tailscale")
+		}
+		go func() { errc <- srv.ListenTCP(ctx, l) }()
+	}
 	return <-errc
+}
+
+const defaultConnector = "127.0.0.1:7518"
+
+// serveHTTP serves h on l until ctx ends.
+func serveHTTP(ctx context.Context, h http.Handler, l net.Listener) error {
+	srv := &http.Server{Handler: h, ReadHeaderTimeout: 10 * time.Second}
+	go func() {
+		<-ctx.Done()
+		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		srv.Shutdown(sctx)
+	}()
+	if err := srv.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
 }
 
 const defaultWeb = "127.0.0.1:7517"
