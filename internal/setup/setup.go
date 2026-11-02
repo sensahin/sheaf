@@ -694,6 +694,15 @@ func PrepareWorktree(dir, kind, sheaf string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	if kind == "codex" {
+		for _, f := range files {
+			if f.Path == ".codex/hooks.json" {
+				if err := inheritCodexHookTrust(dir, f.Content); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
 	var wrote []string
 	for _, r := range res {
 		if r.Status == "created" || r.Status == "updated" || r.Status == "merged" {

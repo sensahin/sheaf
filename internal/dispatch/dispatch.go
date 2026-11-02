@@ -371,6 +371,31 @@ func (d *Dispatcher) Check(ctx context.Context, name string) error {
 		d.notified[name] = newest
 		d.mu.Unlock()
 	}
+	// A handoff needs its task's worktree even if the recipient already has
+	// a chat or another task open. Never run it in that unrelated window.
+	for i := len(msgs) - 1; d.Auto && i >= 0; i-- {
+		m := msgs[i]
+		if m.Task == "" {
+			continue
+		}
+		t, err := d.Svc.GetTask(ctx, m.Task)
+		if err != nil || t.Owner != name || !active(t.Status) {
+			continue
+		}
+		w, running, err := d.window(name, t.ID)
+		if err != nil {
+			return err
+		}
+		if running && w.Name == name+":"+t.ID {
+			break
+		}
+		lead := fmt.Sprintf("%s sent you a %s about this task. Read your Sheaf inbox first.", m.From, m.Kind)
+		_, err = d.StartTask(ctx, t.ID, lead)
+		if err == nil {
+			mark()
+		}
+		return err
+	}
 
 	w, running, err := d.window(name, msgs[len(msgs)-1].Task)
 	if err != nil {
@@ -393,23 +418,6 @@ func (d *Dispatcher) Check(ctx context.Context, name string) error {
 	}
 	if !d.Auto {
 		return nil
-	}
-	// Start it on the newest active task it owns that a message is about.
-	for i := len(msgs) - 1; i >= 0; i-- {
-		m := msgs[i]
-		if m.Task == "" {
-			continue
-		}
-		t, err := d.Svc.GetTask(ctx, m.Task)
-		if err != nil || t.Owner != name || !active(t.Status) {
-			continue
-		}
-		lead := fmt.Sprintf("%s sent you a %s about this task. Read your Sheaf inbox first.", m.From, m.Kind)
-		_, err = d.StartTask(ctx, t.ID, lead)
-		if err == nil {
-			mark()
-		}
-		return err
 	}
 	// A direct message is a conversation, even when there is no active task.
 	// Keep its writable working directory separate from repos and credentials.

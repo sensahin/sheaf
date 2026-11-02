@@ -311,6 +311,25 @@ func TestRunRecoversInboxQueuedBeforeStartup(t *testing.T) {
 	}
 }
 
+func TestHandoffOpensTaskWorktreeInsteadOfExistingChat(t *testing.T) {
+	d, term, repo := newDispatcher(t)
+	ctx := context.Background()
+	term.windows = []Window{{Target: "@chat", Name: "codex"}}
+	task, err := d.Svc.CreateTask(ctx, core.HumanCaller, core.TaskSpec{Title: "Review", Owner: "claude", Repo: repo, Worktree: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Svc.Handoff(ctx, core.Caller{Name: "claude"}, core.HandoffRequest{Task: task.ID, To: "codex", Note: "Review this task"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Check(ctx, "codex"); err != nil {
+		t.Fatal(err)
+	}
+	if len(term.opened) != 1 || term.opened[0].Task != task.ID || term.opened[0].Dir != task.Worktree || len(term.typed) != 0 {
+		t.Fatalf("handoff escaped its worktree: opened=%+v typed=%+v", term.opened, term.typed)
+	}
+}
+
 func TestMessagesDoNotTypeIntoBlockedPromptsOrWorkingAgents(t *testing.T) {
 	for _, state := range []string{core.StateBlocked, core.StateWorking} {
 		t.Run(state, func(t *testing.T) {

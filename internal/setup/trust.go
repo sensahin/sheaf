@@ -1,11 +1,14 @@
 package setup
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -46,6 +49,115 @@ func Trust(kind, dir string) error {
 		})
 	}
 	return nil
+}
+
+// inheritCodexHookTrust carries an existing approval to another copy of the
+// exact generated Sheaf hooks. It never creates trust for a new definition,
+// copies disabled hooks, or overwrites a destination's explicit trust state.
+func inheritCodexHookTrust(dir, expected string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	codexHome := filepath.Join(home, ".codex")
+	if d := os.Getenv("CODEX_HOME"); d != "" {
+		codexHome = d
+	}
+	path := filepath.Join(codexHome, "config.toml")
+	old, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	target := filepath.Join(dir, ".codex", "hooks.json")
+	exact := func(path string) bool {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return false
+		}
+		var actual, want any
+		if json.Unmarshal(b, &actual) != nil || json.Unmarshal([]byte(expected), &want) != nil {
+			return false
+		}
+		a, _ := json.Marshal(actual)
+		w, _ := json.Marshal(want)
+		return bytes.Equal(a, w)
+	}
+	if !exact(target) {
+		return nil
+	}
+	type state struct {
+		hash     string
+		disabled bool
+	}
+	states := map[string]*state{}
+	var current *state
+	scan := bufio.NewScanner(bytes.NewReader(old))
+	for scan.Scan() {
+		line := strings.TrimSpace(scan.Text())
+		if strings.HasPrefix(line, "[") {
+			current = nil
+			if key, ok := strings.CutPrefix(line, "[hooks.state."); ok && strings.HasSuffix(key, "]") {
+				key = strings.TrimSuffix(key, "]")
+				if strings.HasPrefix(key, "'") && strings.HasSuffix(key, "'") {
+					key = key[1 : len(key)-1]
+				} else {
+					var err error
+					key, err = strconv.Unquote(key)
+					if err != nil {
+						continue
+					}
+				}
+				current = &state{}
+				states[key] = current
+			}
+			continue
+		}
+		if current == nil {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
+		if k == "enabled" && len(strings.Fields(v)) > 0 && strings.Fields(v)[0] == "false" {
+			current.disabled = true
+		}
+		if k == "trusted_hash" {
+			current.hash, _ = strconv.Unquote(v)
+		}
+	}
+	if err := scan.Err(); err != nil {
+		return err
+	}
+	var add strings.Builder
+	for _, event := range []string{"pre_tool_use", "user_prompt_submit", "stop"} {
+		suffix := ":" + event + ":0:0"
+		for key, s := range states {
+			if !strings.HasSuffix(key, suffix) || s.disabled || !strings.HasPrefix(s.hash, "sha256:") || len(s.hash) != 71 {
+				continue
+			}
+			source := strings.TrimSuffix(key, suffix)
+			prefix := ""
+			if strings.HasPrefix(source, "file:") {
+				source = strings.TrimPrefix(source, "file:")
+				prefix = "file:"
+			}
+			if !filepath.IsAbs(source) || !exact(source) {
+				continue
+			}
+			dest := prefix + target + suffix
+			if _, exists := states[dest]; exists {
+				continue
+			}
+			fmt.Fprintf(&add, "\n[hooks.state.%s]\ntrusted_hash = %s\n", tomlString(dest), tomlString(s.hash))
+			break
+		}
+	}
+	if add.Len() == 0 {
+		return nil
+	}
+	return replaceFile(path, append(old, []byte(add.String())...), 0o600)
 }
 
 // Claude Code keeps per-folder trust in ~/.claude.json (or
