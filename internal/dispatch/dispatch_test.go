@@ -24,17 +24,21 @@ type typedKeys struct {
 
 // fakeTerm is a tmux server in memory.
 type fakeTerm struct {
-	mu      sync.Mutex
-	windows []Window
-	opened  []launch.Spec
-	typed   []typedKeys
-	typeErr error
-	openErr error
+	mu        sync.Mutex
+	windows   []Window
+	opened    []launch.Spec
+	typed     []typedKeys
+	typeErr   error
+	openErr   error
+	onWindows func()
 }
 
 func (f *fakeTerm) Windows() ([]Window, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.onWindows != nil {
+		f.onWindows()
+	}
 	return append([]Window(nil), f.windows...), nil
 }
 
@@ -345,6 +349,22 @@ func TestMessagesDoNotTypeIntoBlockedPromptsOrWorkingAgents(t *testing.T) {
 				t.Fatal("typed into a busy terminal")
 			}
 		})
+	}
+}
+
+func TestAgentStartingWorkDuringInboxDeliveryIsNotInterrupted(t *testing.T) {
+	d, term, _ := newDispatcher(t)
+	ctx := context.Background()
+	term.windows = []Window{{Target: "@codex", Name: "codex"}}
+	d.Svc.Send(ctx, core.HumanCaller, core.SendRequest{To: "codex", Body: "Followup"})
+	term.onWindows = func() {
+		d.Svc.ReportStatus(ctx, core.Caller{Name: "codex"}, core.StatusReport{State: core.StateWorking})
+	}
+	if err := d.Check(ctx, "codex"); err != nil {
+		t.Fatal(err)
+	}
+	if _, n := term.counts(); n != 0 {
+		t.Fatal("used an old idle state after the agent began working")
 	}
 }
 

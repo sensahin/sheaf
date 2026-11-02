@@ -402,6 +402,12 @@ func (d *Dispatcher) Check(ctx context.Context, name string) error {
 		return err
 	}
 	if running {
+		// Inbox reads and tmux discovery can overlap a new turn. Recheck the
+		// current state immediately before typing, rather than using old idle.
+		a, err = d.Svc.GetAgent(ctx, name)
+		if err != nil {
+			return err
+		}
 		d.mu.Lock()
 		booting := time.Since(d.started[name]) < settle
 		d.mu.Unlock()
