@@ -155,8 +155,14 @@ versions; if Codex stops on a prompt, you will see it in the Terminal panel
 (step 9). Claude Code needs no extra flags: Sheaf's hook answers its
 permission checks.
 
-What waits for you, by default: `git push`, `sudo`, and secrets. A force push
-and `curl ... | sh` are refused. See the policy with `sheaf agent policy claude`.
+What waits for you, by default: `git push`, `sudo`, secrets, merges, and
+production deploys, rollbacks and deletions on GitHub, Vercel and Cloudflare.
+A force push and `curl ... | sh` are refused. See the policy with
+`sheaf agent policy claude`.
+
+To let the agents push, deploy and read logs on GitHub, Vercel and Cloudflare,
+follow [platform-access.md](platform-access.md): it stores the tokens in
+`~/.sheaf/env` (`sheaf env set`), which Sheaf adds to every agent it starts.
 
 ## 7. Reach the web view from your phone and Mac
 

@@ -237,11 +237,48 @@ func TestPolicyEvaluate(t *testing.T) {
 		{ActionShell, "sudo apt install jq", Ask},
 		{ActionSecret, "AWS_SECRET_ACCESS_KEY", Ask},
 		{ActionNetwork, "github.com", Allow},
+		{ActionShell, "git add -A && git commit -m x && git push", Ask},
+		{ActionShell, "gh run view 123 --log", Allow},
+		{ActionShell, "gh pr create --fill", Allow},
+		{ActionShell, "gh pr merge 12 --squash", Ask},
+		{ActionShell, "gh api repos/a/b/branches/x -X DELETE", Ask},
+		{ActionShell, "vercel logs https://x.vercel.app", Allow},
+		{ActionShell, "vercel deploy", Allow},
+		{ActionShell, "vercel deploy --prod", Ask},
+		{ActionShell, "npx vercel --prod --yes", Ask},
+		{ActionShell, "vercel env ls", Allow},
+		{ActionShell, "vercel env rm API_KEY production", Ask},
+		{ActionShell, "vercel dns rm rec_1", Ask},
+		{ActionShell, "wrangler tail my-worker", Allow},
+		{ActionShell, "wrangler kv namespace list", Allow},
+		{ActionShell, "cd api && npx wrangler deploy", Ask},
+		{ActionShell, "wrangler r2 bucket delete media", Ask},
+		{ActionShell, "wrangler delete my-worker", Ask},
+		{ActionShell, "wrangler d1 execute db --remote --command 'DROP TABLE x'", Ask},
+		{ActionShell, "wrangler d1 execute db --local --command 'select 1'", Allow},
+		{ActionShell, "curl -X DELETE https://api.cloudflare.com/client/v4/zones/z/dns_records/r", Ask},
 	}
 	for _, c := range cases {
 		if got, _ := p.Evaluate(c.action, c.target); got != c.want {
 			t.Errorf("%s %q = %s, want %s", c.action, c.target, got, c.want)
 		}
+	}
+}
+
+func TestWithDefaults(t *testing.T) {
+	old := Policy{Default: Allow, Rules: []Rule{{ActionShell, "git push*", Allow}, {ActionShell, "rm -rf /", Deny}}}
+	p, added := old.WithDefaults()
+	if added != len(DefaultPolicy().Rules)-1 {
+		t.Errorf("added %d, want %d", added, len(DefaultPolicy().Rules)-1)
+	}
+	if p.Rules[0] != old.Rules[0] {
+		t.Error("own rules must stay first and unchanged")
+	}
+	if _, again := p.WithDefaults(); again != 0 {
+		t.Errorf("second run added %d", again)
+	}
+	if len(old.Rules) != 2 {
+		t.Error("WithDefaults changed its receiver")
 	}
 }
 

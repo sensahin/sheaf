@@ -44,7 +44,7 @@ type Policy struct {
 // DefaultPolicy is what a new agent gets: free to work inside its task, but
 // pushing, privilege escalation and secrets go through you.
 func DefaultPolicy() Policy {
-	return Policy{
+	p := Policy{
 		Default: Allow,
 		Rules: []Rule{
 			{ActionShell, "git push --force*", Deny},
@@ -58,6 +58,99 @@ func DefaultPolicy() Policy {
 			{ActionSecret, "*", Ask},
 		},
 	}
+	p.Rules = append(p.Rules, PlatformRules()...)
+	return p
+}
+
+// PlatformRules send the commands that change production or delete things on
+// GitHub, Vercel and Cloudflare to your queue. Reading logs, listing
+// resources and preview deploys stay free. A leading "*" also catches the
+// command after "cd dir &&" or "npx".
+func PlatformRules() []Rule {
+	ask := func(m ...string) []Rule {
+		var r []Rule
+		for _, x := range m {
+			r = append(r, Rule{ActionShell, x, Ask})
+		}
+		return r
+	}
+	var r []Rule
+	// GitHub: merges, deletions, releases, secrets, visibility, raw writes.
+	r = append(r, ask(
+		"*git push*", // also after "git commit ... &&"
+		"*gh pr merge*",
+		"*gh repo delete*",
+		"*gh repo edit*--visibility*",
+		"*gh repo archive*",
+		"*gh release create*",
+		"*gh release delete*",
+		"*gh secret set*",
+		"*gh secret delete*",
+		"*gh variable delete*",
+		"*gh api*-X DELETE*",
+		"*gh api*--method DELETE*",
+	)...)
+	// Vercel: production, promotion, rollback, deletions, secrets, DNS.
+	r = append(r, ask(
+		"*vercel*--prod*",
+		"*vercel promote*",
+		"*vercel rollback*",
+		"*vercel remove*",
+		"*vercel rm *",
+		"*vercel project rm*",
+		"*vercel project remove*",
+		"*vercel env rm*",
+		"*vercel env remove*",
+		"*vercel env add*production*",
+		"*vercel domains rm*",
+		"*vercel domains remove*",
+		"*vercel dns rm*",
+		"*vercel dns remove*",
+		"*vercel alias rm*",
+		"*vercel alias set*",
+		"*vercel certs rm*",
+	)...)
+	// Cloudflare: Worker deploys, rollbacks, deletions, secrets, remote SQL.
+	r = append(r, ask(
+		"*wrangler deploy*",
+		"*wrangler publish*",
+		"*wrangler rollback*",
+		"*wrangler versions deploy*",
+		"*wrangler delete*",
+		"*wrangler * delete*",
+		"*wrangler secret put*",
+		"*wrangler secret bulk*",
+		"*wrangler pages deploy*--branch*main*",
+		"*wrangler pages deploy*--branch*production*",
+		"*wrangler d1 execute*--remote*",
+		"*wrangler d1 migrations apply*--remote*",
+	)...)
+	// Raw API writes with curl to any of them.
+	r = append(r, ask(
+		"*curl*-X DELETE*",
+		"*curl*--request DELETE*",
+	)...)
+	return r
+}
+
+// WithDefaults returns p plus the default rules it does not have yet, so an
+// agent made by an older Sheaf picks up new protections without losing your
+// own rules. It also returns how many rules it added.
+func (p Policy) WithDefaults() (Policy, int) {
+	have := map[Rule]bool{}
+	for _, r := range p.Rules {
+		have[r] = true
+	}
+	out := Policy{Default: p.Default, Rules: append([]Rule(nil), p.Rules...)}
+	added := 0
+	for _, r := range DefaultPolicy().Rules {
+		if !have[r] {
+			out.Rules = append(out.Rules, r)
+			have[r] = true
+			added++
+		}
+	}
+	return out, added
 }
 
 // Validate checks the policy's effects and actions.
