@@ -34,24 +34,37 @@ func Status(ctx context.Context, client *api.Client, state string, r io.Reader) 
 	if err := client.Call(ctx, "whoami", nil, &who); err != nil || who.IsHuman() {
 		return nil
 	}
-	rep := core.StatusReport{State: state, Note: eventMessage(r), Task: os.Getenv("SHEAF_TASK")}
+	state, note := statusEvent(state, r)
+	if state == "" {
+		return nil
+	}
+	rep := core.StatusReport{State: state, Note: note, Task: os.Getenv("SHEAF_TASK")}
 	client.Call(ctx, "agent.report_status", rep, nil)
 	return nil
 }
 
-// eventMessage pulls a human message out of an agent's event payload.
-func eventMessage(r io.Reader) string {
+// statusEvent distinguishes an idle reminder from a permission dialog.
+// Claude emits both as Notification events, including after a finished task.
+func statusEvent(state string, r io.Reader) (string, string) {
 	if r == nil {
-		return ""
+		return state, ""
 	}
 	var m map[string]any
 	if err := json.NewDecoder(io.LimitReader(r, 1<<20)).Decode(&m); err != nil {
-		return ""
+		return state, ""
+	}
+	if state == core.StateBlocked {
+		switch m["notification_type"] {
+		case "idle_prompt":
+			return core.StateIdle, ""
+		case "auth_success", "elicitation_complete", "elicitation_response", "agent_completed", "plugin_notification":
+			return "", "" // informational notifications do not block the parent
+		}
 	}
 	for _, k := range []string{"message", "notification", "body", "title"} {
 		if s, ok := m[k].(string); ok && s != "" {
-			return oneLine(s, 200)
+			return state, oneLine(s, 200)
 		}
 	}
-	return ""
+	return state, ""
 }
