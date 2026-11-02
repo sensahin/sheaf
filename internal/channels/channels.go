@@ -51,7 +51,35 @@ type Notice struct {
 	Ref string
 	// Decidable is set for approvals, which get Approve and Deny buttons.
 	Decidable bool
+	// Terminal is set when the agent is stopped on a prompt in its own
+	// terminal (a permission dialog, a menu, an input box). Detail holds the
+	// screen; replies are typed into the terminal and the channel offers key
+	// buttons. Ref is then a TermRef.
+	Terminal bool
 }
+
+// TermRef names an agent's terminal in a notice footer, so a reply can find
+// it: term:AGENT or term:AGENT:TASK.
+func TermRef(agent, task string) string {
+	if task == "" {
+		return "term:" + agent
+	}
+	return "term:" + agent + ":" + task
+}
+
+// ParseTermRef splits a TermRef.
+func ParseTermRef(ref string) (agent, task string, ok bool) {
+	rest, ok := strings.CutPrefix(ref, "term:")
+	if !ok || rest == "" {
+		return "", "", false
+	}
+	agent, task, _ = strings.Cut(rest, ":")
+	return agent, task, true
+}
+
+// TermKeys are the buttons a terminal notice offers, as label and key. Digits
+// pick an option in a numbered menu; the rest are tmux key names.
+var TermKeys = [][2]string{{"1", "1"}, {"2", "2"}, {"3", "3"}, {"⏎ Enter", "Enter"}, {"Esc", "Escape"}, {"🔄 Screen", "screen"}}
 
 // Channel is one way to reach the person.
 type Channel interface {
@@ -75,6 +103,8 @@ type Resolver interface {
 type Launcher interface {
 	StartTask(ctx context.Context, id, lead string) (core.StartResult, error)
 	Screen(ctx context.Context, agent, task string, lines int) (core.Screen, error)
+	Type(ctx context.Context, agent, task, text string, enter bool) error
+	Key(ctx context.Context, agent, task, key string) error
 }
 
 // Hub connects channels to the coordination service.
@@ -221,6 +251,7 @@ func (h *Hub) NoticeFor(ctx context.Context, ev core.Event) (Notice, bool, error
 		switch state {
 		case core.StateBlocked:
 			n.Kind, n.Title = NoticeBlocked, ev.Actor+" is blocked"
+			h.attachScreen(ctx, &n)
 		case core.StateDone:
 			if task == "" {
 				return Notice{}, false, nil
@@ -235,6 +266,72 @@ func (h *Hub) NoticeFor(ctx context.Context, ev core.Event) (Notice, bool, error
 		return n, true, nil
 	}
 	return Notice{}, false, nil
+}
+
+// screenWait lets a prompt finish drawing before it is captured.
+var screenWait = 800 * time.Millisecond
+
+// attachScreen shows a blocked agent's terminal in the notice, when Sheaf
+// runs it: the agent is often stopped on its own prompt (a permission
+// dialog, a trust question) that never reached the queue.
+func (h *Hub) attachScreen(ctx context.Context, n *Notice) {
+	if h.Dispatch == nil {
+		return
+	}
+	sleep(ctx, screenWait)
+	s, err := h.Dispatch.Screen(ctx, n.Agent, n.Task, 60)
+	if err != nil {
+		return // not running in Sheaf's tmux
+	}
+	n.Terminal = true
+	n.Ref = TermRef(n.Agent, n.Task)
+	n.Detail = screenTail(s.Text, 18)
+	if n.Body == "" {
+		n.Body = "It is waiting in its terminal. Tap a key, or reply to type an answer."
+	}
+}
+
+// screenTail returns the last n non-blank-trailing lines of a screen.
+func screenTail(text string, n int) string {
+	lines := strings.Split(strings.TrimRight(text, "\n "), "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " ")
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// Press presses a TermKeys key (or "screen" to just look) in the terminal a
+// TermRef names, and returns the screen afterwards.
+func (h *Hub) Press(ctx context.Context, channel, ref, key string) (string, error) {
+	agent, task, ok := ParseTermRef(ref)
+	if !ok {
+		return "", fmt.Errorf("%w: not a terminal", core.ErrInvalid)
+	}
+	if h.Dispatch == nil {
+		return "", errors.New("this daemon cannot reach terminals (no tmux)")
+	}
+	switch key {
+	case "screen":
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		if err := h.Dispatch.Type(ctx, agent, task, key, false); err != nil {
+			return "", err
+		}
+	default:
+		if err := h.Dispatch.Key(ctx, agent, task, key); err != nil {
+			return "", err
+		}
+	}
+	if key != "screen" {
+		sleep(ctx, screenWait)
+	}
+	s, err := h.Dispatch.Screen(ctx, agent, task, 60)
+	if err != nil {
+		return "", err
+	}
+	return screenTail(s.Text, 18), nil
 }
 
 func (h *Hub) approvalNotice(ctx context.Context, a core.Approval) Notice {
@@ -286,9 +383,15 @@ func (h *Hub) Decide(ctx context.Context, channel, id string, approve bool, note
 // refRE finds a Sheaf id in the text of a notice the person replied to.
 var refRE = regexp.MustCompile(`\b([amt]-[0-9a-z]{8})\b`)
 
+// termRE finds a TermRef, which wins over everything else in a footer.
+var termRE = regexp.MustCompile(`\bterm:[a-z0-9][a-z0-9_-]{0,31}(:t-[0-9a-z]{8})?`)
+
 // RefIn returns the last approval, message or task id in text: the one a
 // notice names in its footer.
 func RefIn(text string) string {
+	if t := termRE.FindAllString(text, -1); len(t) > 0 {
+		return t[len(t)-1]
+	}
 	all := refRE.FindAllString(text, -1)
 	// Prefer approvals and messages, which are what a reply answers.
 	for i := len(all) - 1; i >= 0; i-- {
@@ -318,6 +421,15 @@ func (h *Hub) Reply(ctx context.Context, channel, ref, text string) (string, err
 	}
 	c := caller(channel)
 	switch {
+	case strings.HasPrefix(ref, "term:"):
+		agent, task, _ := ParseTermRef(ref)
+		if h.Dispatch == nil {
+			return "", errors.New("this daemon cannot reach terminals (no tmux)")
+		}
+		if err := h.Dispatch.Type(ctx, agent, task, text, true); err != nil {
+			return "", err
+		}
+		return "Typed into " + agent + "'s terminal.", nil
 	case strings.HasPrefix(ref, "a-"):
 		a, err := h.Svc.GetApproval(ctx, c, ref)
 		if err != nil {
@@ -471,8 +583,13 @@ func (h *Hub) Command(ctx context.Context, channel, text string) (string, []Noti
 		return r, nil, err
 	case "screen":
 		agent, _ := splitWord(rest)
-		r, err := h.screen(ctx, strings.TrimPrefix(agent, "@"))
-		return r, nil, err
+		agent = strings.TrimPrefix(agent, "@")
+		r, err := h.screen(ctx, agent)
+		if err != nil {
+			return "", nil, err
+		}
+		return "", []Notice{{Kind: NoticeInfo, Agent: agent, Title: agent + "'s terminal", Detail: screenTail(r, 18),
+			Ref: TermRef(agent, ""), Terminal: true}}, nil
 	}
 	return "Unknown command /" + cmd + ".\n\n" + Help, nil, nil
 }

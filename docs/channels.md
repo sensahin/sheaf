@@ -55,7 +55,16 @@ chat can use it: messages from anyone else are ignored.
   carries on.
 - **Messages** from an agent: reply to send your answer to that agent's inbox.
   Sheaf wakes the agent if it is idle.
-- **Blocked** and **finished** notices: reply to message the agent about that task.
+- **Stuck on a terminal prompt.** An agent sometimes stops on its own
+  prompt, such as Claude Code's "Do you want to proceed?" or a trust question,
+  which never reaches the Sheaf queue. Claude Code reports this as
+  *blocked*. When the daemon runs the agent in tmux, the notice shows the last
+  lines of its terminal with **1 / 2 / 3 / Enter / Esc / Screen** buttons. Tap
+  one to pick a menu option, or reply to type text and Enter. After each tap
+  you get the new screen. `/screen claude` brings up the same view at any
+  time.
+- **Finished** notices (and blocked agents that aren't Sheaf-run): reply to
+  message the agent about that task.
 - Commands:
 
   ```
@@ -118,7 +127,8 @@ without the slash: `task claude Redesign the about page`, `queue`, `tasks`,
 Sheaf can act as a remote MCP server ("custom connector") for the Claude and
 ChatGPT apps, on the web, desktop and phone. The connector has these tools:
 `overview`, `list_tasks`, `get_task`, `create_task`, `message_agent`,
-`list_approvals`, `decide`, `read_messages`, `agent_screen` and `list_repos`.
+`list_approvals`, `decide`, `read_messages`, `agent_screen`, `answer_terminal`
+(answer a prompt the agent is stopped on in its terminal) and `list_repos`.
 
 The apps connect from their own cloud, so the connector needs a public HTTPS
 address. It runs on its **own port** and serves only the connector and its

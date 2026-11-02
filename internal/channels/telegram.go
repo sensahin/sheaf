@@ -92,6 +92,8 @@ func FormatHTML(n Notice) string {
 	}
 	var foot []string
 	switch {
+	case n.Terminal:
+		foot = append(foot, "Reply to type into "+n.Agent+"'s terminal")
 	case n.Kind == NoticeQuestion:
 		foot = append(foot, "Reply to answer")
 	case n.Decidable:
@@ -102,13 +104,27 @@ func FormatHTML(n Notice) string {
 	if n.Ref != "" {
 		foot = append(foot, n.Ref)
 	}
-	if n.Task != "" {
+	if n.Task != "" && !n.Terminal {
 		foot = append(foot, n.Task)
 	}
 	if len(foot) > 0 {
 		fmt.Fprintf(&b, "\n<i>%s</i>", esc(strings.Join(foot, " · ")))
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// termKeyboard offers TermKeys for the terminal ref names.
+func termKeyboard(ref string) *inlineKeyboard {
+	var row1, row2 []inlineButton
+	for i, k := range TermKeys {
+		b := inlineButton{Text: k[0], CallbackData: "k:" + k[1] + ":" + ref}
+		if i < 3 {
+			row1 = append(row1, b)
+		} else {
+			row2 = append(row2, b)
+		}
+	}
+	return &inlineKeyboard{InlineKeyboard: [][]inlineButton{row1, row2}}
 }
 
 func decideKeyboard(id string) *inlineKeyboard {
@@ -124,6 +140,9 @@ func (t *Telegram) Send(ctx context.Context, n Notice) error {
 	msg := sendMessage{ChatID: t.cfg.ChatID, Text: text, ParseMode: "HTML", LinkPreview: &linkPreview{Disabled: true}}
 	if n.Decidable && n.Ref != "" {
 		msg.ReplyMarkup = decideKeyboard(n.Ref)
+	}
+	if n.Terminal {
+		msg.ReplyMarkup = termKeyboard(n.Ref)
 	}
 	if n.Kind == NoticeQuestion {
 		// Open the reply box straight away.
@@ -192,6 +211,20 @@ func (t *Telegram) handle(ctx context.Context, h *Hub, u update) {
 			return
 		}
 		action, id, _ := strings.Cut(q.Data, ":")
+		if action == "k" {
+			key, ref, _ := strings.Cut(id, ":")
+			agent, _, _ := ParseTermRef(ref)
+			screen, err := h.Press(ctx, t.Name(), ref, key)
+			ack := "Sent"
+			if err != nil {
+				ack = errText(err)
+			}
+			t.api.call(ctx, "answerCallbackQuery", map[string]any{"callback_query_id": q.ID, "text": ack}, nil)
+			if err == nil {
+				t.Send(ctx, Notice{Kind: NoticeInfo, Agent: agent, Title: agent + "'s terminal", Detail: screen, Ref: ref, Terminal: true})
+			}
+			return
+		}
 		var reply string
 		if _, err := h.Decide(ctx, t.Name(), id, action == "approve", ""); err != nil {
 			reply = errText(err)
