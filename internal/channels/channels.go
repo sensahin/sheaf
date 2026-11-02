@@ -254,7 +254,7 @@ func (h *Hub) NoticeFor(ctx context.Context, ev core.Event) (Notice, bool, error
 		for _, id := range ids {
 			s, _ := id.(string)
 			m, err := h.Svc.MessageStatus(ctx, core.HumanCaller, s)
-			if err == nil && m.From == core.Human && m.To == ev.Actor {
+			if err == nil && m.From == core.Human && m.To == ev.Actor && m.Kind != core.KindDecision {
 				last = &m
 			}
 		}

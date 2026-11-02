@@ -38,7 +38,7 @@ func Status(ctx context.Context, client *api.Client, state string, r io.Reader) 
 	if state == "" {
 		return nil
 	}
-	rep := core.StatusReport{State: state, Note: note, Task: os.Getenv("SHEAF_TASK")}
+	rep := core.StatusReport{State: state, Note: note, Task: os.Getenv("SHEAF_TASK"), Lifecycle: true}
 	client.Call(ctx, "agent.report_status", rep, nil)
 	return nil
 }
