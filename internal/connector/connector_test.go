@@ -173,6 +173,32 @@ func TestMetadataAndUnauthorized(t *testing.T) {
 	}
 }
 
+func TestAuthorizeFormPermitsRegisteredCallback(t *testing.T) {
+	_, ts, _ := setup(t)
+	const redirect = "https://claude.ai/api/mcp/auth_callback"
+	client := register(t, ts.URL, redirect)
+	q := url.Values{"response_type": {"code"}, "client_id": {client}, "redirect_uri": {redirect},
+		"code_challenge": {"challenge"}, "code_challenge_method": {"S256"}}
+	for _, valid := range []bool{true, false} {
+		if !valid {
+			q.Set("redirect_uri", "https://unregistered.example/callback")
+		}
+		resp, err := http.Get(ts.URL + "/authorize?" + q.Encode())
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		policy := resp.Header.Get("Content-Security-Policy")
+		if valid {
+			if resp.StatusCode != 200 || !strings.Contains(policy, "form-action 'self' https://claude.ai;") {
+				t.Fatalf("registered OAuth callback must be allowed through a form redirect: %d %q", resp.StatusCode, policy)
+			}
+		} else if resp.StatusCode != 400 || !strings.Contains(policy, "form-action 'self';") || strings.Contains(policy, "unregistered.example") {
+			t.Fatalf("unregistered callback widened the form policy: %d %q", resp.StatusCode, policy)
+		}
+	}
+}
+
 func TestSignInAndUseTools(t *testing.T) {
 	ctx := context.Background()
 	s, ts, svc := setup(t)

@@ -127,13 +127,19 @@ you can get by signing in (below).
 
 ### 1. Give it a public address with Tailscale Funnel
 
-If you already followed docs/remote-server.md, Tailscale serves your private
-web queue on port 443. Funnel exposes the connector to the internet on port
-8443, and leaves the queue private:
+Claude connects to MCP and OAuth endpoints on standard HTTPS port 443.
+If you already followed docs/remote-server.md, move the private web queue to
+8443 before putting the connector on 443. This changes the dashboard address;
+it does not make the dashboard public. Pair an existing device again at the
+new dashboard address if its browser asks for a token.
 
 ```sh
-sudo tailscale funnel --bg --https=8443 http://127.0.0.1:7518
-tailscale funnel status          # shows https://<server>.<tailnet>.ts.net:8443
+sudo tailscale serve --https=443 off
+sudo tailscale serve --bg --https=8443 http://127.0.0.1:7517
+sudo tailscale funnel --bg --https=443 http://127.0.0.1:7518
+tailscale funnel status          # connector: https://<server>.<tailnet>.ts.net
+sheaf service --public-url https://<server>.<tailnet>.ts.net:8443 > ~/.config/systemd/user/sheaf.service
+systemctl --user daemon-reload
 ```
 
 If Tailscale says Funnel is not enabled for your tailnet, open the link it
@@ -145,17 +151,17 @@ Any other HTTPS reverse proxy (Caddy, Cloudflare Tunnel) works too. Point it at
 ### 2. Turn the connector on
 
 ```sh
-sheaf connector enable --url https://<server>.<tailnet>.ts.net:8443
+sheaf connector enable --url https://<server>.<tailnet>.ts.net
 systemctl --user restart sheaf
-curl -s https://<server>.<tailnet>.ts.net:8443/.well-known/oauth-authorization-server   # should print JSON
+curl -s https://<server>.<tailnet>.ts.net/.well-known/oauth-authorization-server   # should print JSON
 ```
 
 ### 3. Add it to the app
 
 - **Claude** (claude.ai or the Claude app): **Settings → Connectors → Add
   custom connector**. Name it `Sheaf` and enter the URL
-  `https://<server>.<tailnet>.ts.net:8443/mcp`. Leave the advanced OAuth fields
-  empty.
+  `https://<server>.<tailnet>.ts.net/mcp`. Choose **Register automatically**
+  (DCR) for the OAuth client; Sheaf does not support CIMD.
 - **ChatGPT**: **Settings → Apps & Connectors → Advanced settings**, turn on
   **Developer mode**, then **Create** a connector with the same URL and
   **OAuth** authentication. Developer mode depends on your ChatGPT plan.
